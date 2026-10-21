@@ -1,0 +1,15 @@
+import {fetchFeed,selectOffers} from './feed.mjs';
+const SITE='https://bookflip.karnol13.chatgpt.site';
+const ENDPOINT=SITE+'/api/github-scanner';
+const serviceToken=process.env.BOOKFLIP_SITES_ACCESS;
+const stopAt=Date.now()+75000;
+async function oidc(){const endpoint=new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL||'');if(endpoint.protocol!=='https:'||!endpoint.hostname.endsWith('.actions.githubusercontent.com'))throw Error('OIDC_ENVIRONMENT_UNAVAILABLE');endpoint.searchParams.set('audience',ENDPOINT);const r=await fetch(endpoint,{headers:{Authorization:'Bearer '+process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN},redirect:'error',signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error('OIDC_TOKEN_UNAVAILABLE');const d=await r.json();if(!d.value)throw Error('OIDC_TOKEN_UNAVAILABLE');return d.value;}
+async function main(){if(!serviceToken)throw Error('BOOKFLIP_SITES_ACCESS_MISSING');const token=await oidc();async function api(body){const r=await fetch(ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json','OAI-Sites-Authorization':'Bearer '+serviceToken,Authorization:'Bearer '+token},redirect:'error',body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});const data=await r.json().catch(()=>({error:'INVALID_API_RESPONSE'}));if(!r.ok||data.error)throw Error(data.error||'SITE_HTTP_'+r.status);return data;}
+ const before=await api({action:'status'});console.log(JSON.stringify({connection:'ok',active:before.active}));let completed=0,blocked=0,failed=0;
+ while(Date.now()<stopAt){const {task}=await api({action:'claim'});if(!task)break;if(task.adapter!=='json_feed'||!task.feedUrl){await api({action:'fail',taskId:task.id,leaseToken:task.leaseToken,kind:'blocked',message:'SOURCE_NOT_CONFIGURED: brak dopuszczonego feedu JSON. Skonfiguruj źródło na stronie BookFlip; nie uruchomiono scrapingu.'});blocked++;continue;}
+ let offers;try{const feed=await fetchFeed(task.feedUrl);offers=selectOffers(feed,task);}catch(e){const temporary=[429,500,502,503,504].includes(e.status)||/TIMEOUT|ECONNRESET|ETIMEDOUT|ENOTFOUND/.test(e.message);await api({action:'fail',taskId:task.id,leaseToken:task.leaseToken,kind:temporary?'temporary':'blocked',message:String(e.message).slice(0,200),retryAfterSeconds:e.retryAfter||300});failed++;continue;}
+ // Do not replay an uncertain completed write as a failure: status/lease resolves it on the next run.
+ await api({action:'complete',taskId:task.id,leaseToken:task.leaseToken,coverage:'Autoryzowany feed JSON odczytany przez GitHub Actions. Zakres ograniczony do treści feedu i maksymalnie 20 pasujących ofert; brak pełnego pokrycia portalu.',offers});completed++;
+ }
+ const after=await api({action:'status'});console.log(JSON.stringify({completed,blocked,failed,remaining:after.active}));}
+main().catch(e=>{console.error(JSON.stringify({error:/^[A-Z0-9_]+$/.test(e.message)?e.message:'RUNNER_FAILED'}));process.exitCode=1;});
