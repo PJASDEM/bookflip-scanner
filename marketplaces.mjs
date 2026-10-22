@@ -1,3 +1,4 @@
+import {bibliographicMetadata} from '../lib/isbn.mjs';
 import {createHash} from 'node:crypto';
 import {setTimeout as wait} from 'node:timers/promises';
 import {parseVinted,parseAllegroListing,parseOlx,rscText,objectAt} from './reference-parsers.mjs';
@@ -5,6 +6,10 @@ const sources={Vinted:{host:'www.vinted.pl',path:'/items/'},'Allegro Lokalnie':{
 const norm=s=>String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ł/g,'l').replace(/[^a-z0-9]+/g,' ').trim();
 export function acceptsBook(task,title){const n=norm(title);if(/\b(ebook|e book|epub|mobi|audiobook|audio book|stl|figurka|figurki|figurek|miniatures?|unpainted|sprue|dvd|cd|gra pc|gra ps5|gra ps4|gra komputerowa|karty|naklejki|zakladka|bookmark)\b/.test(n))return false;if(task.mode==='watchlist')return n.includes(norm(task.title));if(task.source==='Allegro Lokalnie')return /warcraft|warhammer|horus|herezja/i.test(n)&&/ksiaz|book|powies|novel|tom|omnibus|horus|herezja|abnett|mcneill|golden|knaak|komiks|manga/.test(n);return true;}
 export function searchUrl(task){if(!sources[task.source]||task.host!==sources[task.source].host)throw Error('UNTRUSTED_MARKETPLACE_TASK');const query=task.mode==='watchlist'?task.title:task.category==='Warcraft'?'Warcraft':'Warhammer';if(task.source==='Vinted'){const u=new URL('https://www.vinted.pl/catalog/2312-books');u.searchParams.set('search_text',query);if(task.paginationVersion===1){if(!Number.isInteger(task.page)||task.page<1||task.page>10000)throw Error('INVALID_VINTED_PAGE');u.searchParams.set('page',String(task.page));}return u.href;}if(task.source==='Allegro Lokalnie')return 'https://allegrolokalnie.pl/oferty/q/'+encodeURIComponent(task.mode==='watchlist'?query:query+' książki');return 'https://www.olx.pl/muzyka-edukacja/ksiazki/q-'+encodeURIComponent(query)+'/';}
+export function retryAfterSeconds(header,now=Date.now()){
+ const text=String(header||'').trim(),seconds=/^\d+$/.test(text)?Number(text):(Date.parse(text)-now)/1000;
+ return Number.isFinite(seconds)&&seconds>=0?Math.max(30,Math.ceil(seconds)):30;
+}
 const lastReads=new Map();
 export async function readSourceHtml(raw,{fetcher=fetch,source,pause=wait,now=Date.now}={}){
  const config=sources[source];if(!config)throw Error('UNTRUSTED_MARKETPLACE_TASK');const allowed=h=>h===config.host||h===config.host.replace(/^www\./,'');let url=new URL(raw);const signal=AbortSignal.timeout(18000);
@@ -12,7 +17,7 @@ export async function readSourceHtml(raw,{fetcher=fetch,source,pause=wait,now=Da
   if(url.protocol!=='https:'||!allowed(url.hostname)||url.username||url.password||url.port)throw Error('UNSAFE_SOURCE_REDIRECT');
   await pause(Math.max(0,(lastReads.get(source)||0)+2000-now()),undefined,{signal});lastReads.set(source,now());
   const response=await fetcher(url,{headers:{Accept:'text/html','User-Agent':'BookFlip/1.0 (book price comparison)'},redirect:'manual',signal});
-  if([403,429].includes(response.status)){await response.body?.cancel();throw Object.assign(Error('SOURCE_HTTP_'+response.status),{status:response.status,blocked:true});}
+  if([403,429].includes(response.status)){const retryAfter=retryAfterSeconds(response.headers.get('retry-after'),now());await response.body?.cancel();throw Object.assign(Error('SOURCE_HTTP_'+response.status),{status:response.status,blocked:response.status===403,retryable:response.status===429,retryAfter});}
   if([301,302,303,307,308].includes(response.status)){const location=response.headers.get('location');await response.body?.cancel();if(!location)throw Error('SOURCE_REDIRECT_MISSING');url=new URL(location,url);continue;}
   if(!response.ok){await response.body?.cancel();throw Object.assign(Error('SOURCE_HTTP_'+response.status),{status:response.status});}
   if(!/text\/html|application\/xhtml/i.test(response.headers.get('content-type')||'')){await response.body?.cancel();throw Error('SOURCE_NOT_HTML');}
@@ -32,7 +37,7 @@ export function parseMarketplace(html,task,observedAt=new Date().toISOString(),l
  const out=[],seen=new Set();for(const row of rows){if(row.available===false&&row.availabilityKnown!==false)continue;let u;try{u=new URL(row.url);}catch{continue;}if(u.protocol!=='https:'||![task.host,task.host.replace(/^www\./,'')].includes(u.hostname)||u.username||u.password||u.port||!u.pathname.startsWith(sources[task.source].path))continue;
   if(task.source==='Vinted'&&!/^\/items\/\d+/.test(u.pathname))continue;
   u.search='';u.hash='';if(seen.has(u.href))continue;seen.add(u.href);const price=Math.round(row.price*100);if(!Number.isSafeInteger(price)||price<=0||price>100000000)continue;
-  out.push({title:row.title.slice(0,500),url:u.href,price,observedAt,activeConfirmed:false,priceConfirmed:false,availability:'unconfirmed',priceEvidence:'marketplace_listing'});if(out.length===limit)break;
+  out.push({...bibliographicMetadata(row),title:row.title.slice(0,500),url:u.href,price,observedAt,activeConfirmed:false,priceConfirmed:false,availability:'unconfirmed',priceEvidence:'marketplace_listing'});if(out.length===limit)break;
  }return out;
 }
 export function vintedPageInfo(html,task){
