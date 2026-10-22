@@ -14,7 +14,7 @@ async function main(){if(!serviceToken)throw Error('BOOKFLIP_SITES_ACCESS_MISSIN
   let offset=task.pageOffset||0;
   if(offset>0&&task.pageDigest!==pagination.digest){await api({action:'complete',taskId:task.id,leaseToken:task.leaseToken,coverage,offers:[],pagination:{...pagination,offset,reset:true}});offset=0;}
   if(offset===0&&(task.pageDigests||[]).includes(pagination.digest)){await api({action:'complete',taskId:task.id,leaseToken:task.leaseToken,coverage,offers:[],pagination:{...pagination,offset:0}});completed++;continue;}
-  do{const batch=offers.slice(offset,offset+20);await api({action:'complete',taskId:task.id,leaseToken:task.leaseToken,coverage,offers:batch,pagination:{...pagination,offset}});offset+=batch.length;if(offset>=offers.length)break;if(Date.now()>stopAt-5000)break runLoop;}while(true);
+  do{const batch=offers.slice(offset,offset+20);await api({action:'complete',taskId:task.id,leaseToken:task.leaseToken,coverage,offers:batch,pagination:{...pagination,offset}});offset+=batch.length;if(offset>=offers.length)break;if(Date.now()>stopAt-5000){await api({action:'yield',taskId:task.id,leaseToken:task.leaseToken});break runLoop;}}while(true);
   console.log(JSON.stringify({source:'Vinted',page:pagination.page,entries:offers.length,nextPage:pagination.nextPage,state:pagination.state}));completed++;continue;
  }
  // Do not replay an uncertain completed write as a failure: status/lease resolves it on the next run.
