@@ -1,9 +1,10 @@
+import {createHash} from 'node:crypto';
 import {setTimeout as wait} from 'node:timers/promises';
-import {parseVinted,parseAllegroListing,parseOlx} from './reference-parsers.mjs';
+import {parseVinted,parseAllegroListing,parseOlx,rscText,objectAt} from './reference-parsers.mjs';
 const sources={Vinted:{host:'www.vinted.pl',path:'/items/'},'Allegro Lokalnie':{host:'allegrolokalnie.pl',path:'/oferta/'},OLX:{host:'www.olx.pl',path:'/d/oferta/'}};
 const norm=s=>String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ł/g,'l').replace(/[^a-z0-9]+/g,' ').trim();
 export function acceptsBook(task,title){const n=norm(title);if(/\b(ebook|e book|epub|mobi|audiobook|audio book|stl|figurka|figurki|figurek|miniatures?|unpainted|sprue|dvd|cd|gra pc|gra ps5|gra ps4|gra komputerowa|karty|naklejki|zakladka|bookmark)\b/.test(n))return false;if(task.mode==='watchlist')return n.includes(norm(task.title));if(task.source==='Allegro Lokalnie')return /warcraft|warhammer|horus|herezja/i.test(n)&&/ksiaz|book|powies|novel|tom|omnibus|horus|herezja|abnett|mcneill|golden|knaak|komiks|manga/.test(n);return true;}
-export function searchUrl(task){if(!sources[task.source]||task.host!==sources[task.source].host)throw Error('UNTRUSTED_MARKETPLACE_TASK');const query=task.mode==='watchlist'?task.title:task.category==='Warcraft'?'Warcraft':'Warhammer';if(task.source==='Vinted')return 'https://www.vinted.pl/catalog/2312-books?search_text='+encodeURIComponent(query);if(task.source==='Allegro Lokalnie')return 'https://allegrolokalnie.pl/oferty/q/'+encodeURIComponent(task.mode==='watchlist'?query:query+' książki');return 'https://www.olx.pl/muzyka-edukacja/ksiazki/q-'+encodeURIComponent(query)+'/';}
+export function searchUrl(task){if(!sources[task.source]||task.host!==sources[task.source].host)throw Error('UNTRUSTED_MARKETPLACE_TASK');const query=task.mode==='watchlist'?task.title:task.category==='Warcraft'?'Warcraft':'Warhammer';if(task.source==='Vinted'){const u=new URL('https://www.vinted.pl/catalog/2312-books');u.searchParams.set('search_text',query);if(task.paginationVersion===1){if(!Number.isInteger(task.page)||task.page<1||task.page>10000)throw Error('INVALID_VINTED_PAGE');u.searchParams.set('page',String(task.page));}return u.href;}if(task.source==='Allegro Lokalnie')return 'https://allegrolokalnie.pl/oferty/q/'+encodeURIComponent(task.mode==='watchlist'?query:query+' książki');return 'https://www.olx.pl/muzyka-edukacja/ksiazki/q-'+encodeURIComponent(query)+'/';}
 const lastReads=new Map();
 export async function readSourceHtml(raw,{fetcher=fetch,source,pause=wait,now=Date.now}={}){
  const config=sources[source];if(!config)throw Error('UNTRUSTED_MARKETPLACE_TASK');const allowed=h=>h===config.host||h===config.host.replace(/^www\./,'');let url=new URL(raw);const signal=AbortSignal.timeout(18000);
@@ -22,7 +23,7 @@ export async function readSourceHtml(raw,{fetcher=fetch,source,pause=wait,now=Da
   return html;
  }throw Error('SOURCE_REDIRECT_LIMIT');
 }
-export function parseMarketplace(html,task,observedAt=new Date().toISOString()){
+export function parseMarketplace(html,task,observedAt=new Date().toISOString(),limit=20){
  searchUrl(task);const book={accept:title=>acceptsBook(task,title)};let rows;
  try{if(task.source==='Vinted')rows=parseVinted(html,book,observedAt);else if(task.source==='Allegro Lokalnie')rows=parseAllegroListing(html,book,observedAt);else{
   let recognized=false;for(const m of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)){try{const d=JSON.parse(m[1]);if(Array.isArray(d.offers?.offers))recognized=true;}catch{}}
@@ -31,7 +32,16 @@ export function parseMarketplace(html,task,observedAt=new Date().toISOString()){
  const out=[],seen=new Set();for(const row of rows){if(row.available===false&&row.availabilityKnown!==false)continue;let u;try{u=new URL(row.url);}catch{continue;}if(u.protocol!=='https:'||![task.host,task.host.replace(/^www\./,'')].includes(u.hostname)||u.username||u.password||u.port||!u.pathname.startsWith(sources[task.source].path))continue;
   if(task.source==='Vinted'&&!/^\/items\/\d+/.test(u.pathname))continue;
   u.search='';u.hash='';if(seen.has(u.href))continue;seen.add(u.href);const price=Math.round(row.price*100);if(!Number.isSafeInteger(price)||price<=0||price>100000000)continue;
-  out.push({title:row.title.slice(0,500),url:u.href,price,observedAt,activeConfirmed:false,priceConfirmed:false,availability:'unconfirmed',priceEvidence:'marketplace_listing'});if(out.length===20)break;
+  out.push({title:row.title.slice(0,500),url:u.href,price,observedAt,activeConfirmed:false,priceConfirmed:false,availability:'unconfirmed',priceEvidence:'marketplace_listing'});if(out.length===limit)break;
  }return out;
 }
-export async function scanMarketplace(task,options={}){const html=await readSourceHtml(searchUrl(task),{...options,source:task.source});return{offers:parseMarketplace(html,task),coverage:'Bezpośredni czytnik HTML przeniesiony z Archiwum 40K. Jedna strona wyszukiwania, maksymalnie 20 pasujących wpisów. Cena z listy wyników; dostępność, cena szczegółowa, wydanie i pełne koszty wymagają sprawdzenia. Brak pełnego pokrycia portalu.'};}
+export function vintedPageInfo(html,task){
+ const page=task.page||1,data=rscText(html),ids=[];
+ for(const m of data.matchAll(/"productItem"\s*:\s*\{/g)){const p=objectAt(data,m.index+m[0].length-1);if(p?.url)ids.push(p.url);}
+ const digest=createHash('sha256').update(JSON.stringify([...new Set(ids)].sort())).digest('hex');
+ for(const m of data.matchAll(/"pagination"\s*:\s*\{/g)){const p=objectAt(data,m.index+m[0].length-1);if(!p)continue;const current=p.currentPage??p.current_page,total=p.totalPages??p.total_pages;if(Number.isInteger(current)&&Number.isInteger(total)&&current>0&&total>=current){if(current!==page)throw Error('VINTED_PAGE_NOT_MATCHED');return{page,digest,state:current<total?'more':'end',nextPage:current<total?current+1:null,totalPages:total};}}
+ const current=new URL(searchUrl(task));
+ for(const m of html.matchAll(/<(?:a|link)\b([^>]*)>/gi)){const attrs=m[1];if(!/\bnext\b|nast[eę]pn/i.test(attrs)||/aria-disabled=["']true|\bdisabled\b/i.test(attrs))continue;const href=attrs.match(/\bhref=["']([^"']+)["']/i)?.[1];if(!href)continue;try{const u=new URL(href.replace(/&amp;/g,'&'),current);if(u.origin===current.origin&&u.pathname===current.pathname&&u.searchParams.get('search_text')===current.searchParams.get('search_text')&&Number(u.searchParams.get('page'))===page+1)return{page,digest,state:'more',nextPage:page+1};}catch{}}
+ return{page,digest,state:'unknown',nextPage:null};
+}
+export async function scanMarketplace(task,options={}){const html=await readSourceHtml(searchUrl(task),{...options,source:task.source});const paginated=task.source==='Vinted'&&task.paginationVersion===1;const offers=parseMarketplace(html,task,new Date().toISOString(),paginated?5001:20);if(offers.length>5000)throw Error('VINTED_PAGE_TOO_LARGE');const pagination=paginated?{...vintedPageInfo(html,task),total:offers.length}:undefined;return{offers,pagination,coverage:paginated?`Vinted: strona ${task.page}, ${offers.length} pasujących wpisów na stronie. Partie po 20, postęp zapisywany atomowo. ${pagination.state==='end'?'Ostatnia strona według Vinted.':pagination.state==='more'?'Potwierdzono kolejną stronę.':'Nie rozpoznano kolejnej strony; zakres niepełny.'} Dostępność, wydanie i koszty wymagają sprawdzenia. Zmiany kolejności ofert mogą powodować duplikaty lub pominięcia.`:'Bezpośredni czytnik HTML przeniesiony z Archiwum 40K. Jedna strona wyszukiwania, maksymalnie 20 pasujących wpisów. Cena z listy wyników; dostępność, cena szczegółowa, wydanie i pełne koszty wymagają sprawdzenia. Brak pełnego pokrycia portalu.'};}

@@ -113,4 +113,4 @@ function parseOlx(html, b, checked) {
 	} catch {}
 	return out;
 }
-export {parseVinted,parseAllegroListing,parseOlx};
+export {parseVinted,parseAllegroListing,parseOlx,rscText,objectAt};
