@@ -8,9 +8,13 @@ Workflow ma tylko contents:read i id-token:write, bez zapisów do repozytorium. 
 
 ## Źródła
 
+Podłączono publiczny kanał RSS/Atom Sprzedajemy.pl, udostępniony przez wydawcę na stronach wyszukiwania. Wykonawca odczytuje wyłącznie kanał, bez pobierania stron ogłoszeń. Importuje maksymalnie 20 pasujących wpisów z kategorii Książki i Podręczniki, odrzuca figurki i gry komputerowe. Cena jest ceną z kanału, a dostępność pozostaje niepotwierdzona. Data odczytu kanału i data aktualizacji wpisu są oddzielne. Pusty poprawny kanał oznacza brak pasujących wpisów w tym zakresie, nie brak ofert w całym serwisie.
+
+Każdy przebieg tworzy kolejny skan Discovery oraz Watchlist, jeżeli poprzednia kolejka została zakończona. Harmonogram można wstrzymać i wznowić na stronie. Wstrzymanie anuluje oczekujące zadania; ręczne skany są nadal dostępne.
+
 W BookFlip → Źródła i skanery edytuj źródło, wybierz „Dopuszczony feed JSON”, podaj publiczny URL HTTPS feedu bez sekretów i potwierdź uprawnienie do automatycznego odczytu. Feed to tablica lub {"offers":[...]}; rekord: {"title":"...","url":"https://...konkretna-oferta...","price":4500,"active":true,"observedAt":"2026-10-21T20:00:00Z"}. Kwoty: grosze PLN. Rekordy muszą być aktualne (24h), aktywne i pasować do tematu zadania. Dostęp do feedu nie potwierdza wydania ani pełnych kosztów nabycia.
 
-Brak feedu jest widocznym SOURCE_NOT_CONFIGURED, nie pustym sukcesem. Nie zaimplementowano scrapera Vinted, OLX ani Allegro. Potrzebny jest dopuszczony dostęp/dostawca feedu. Nie ma rotacji proxy, omijania CAPTCHA ani ponawiania blokad. DNS i adresy feedu są walidowane i przypinane; brak przekierowań, limit 1 MB, 15 sekund.
+Vinted, OLX i Allegro Lokalnie nie są automatycznie odczytywane bez osobnego dopuszczonego feedu. Źródła ręczne nie są dodawane do automatycznej kolejki. Nie zaimplementowano scrapera tych serwisów. Nie ma rotacji proxy ani omijania CAPTCHA. DNS i adresy feedu są walidowane i przypinane; brak przekierowań, limit 1 MB, 15 sekund.
 
 ## Koszty i limity
 
