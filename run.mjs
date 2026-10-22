@@ -1,3 +1,4 @@
+import {enrichVintedBatch} from './vinted-detail.mjs';
 import {fetchFeed,selectOffers} from './feed.mjs';
 import {sprzedajemyFeedUrl,parseSprzedajemyAtom} from './rss.mjs';
 import {scanMarketplace} from './marketplaces.mjs';
@@ -14,7 +15,7 @@ async function main(){if(!serviceToken)throw Error('BOOKFLIP_SITES_ACCESS_MISSIN
   let offset=task.pageOffset||0;
   if(offset>0&&task.pageDigest!==pagination.digest){await api({action:'complete',taskId:task.id,leaseToken:task.leaseToken,coverage,offers:[],pagination:{...pagination,offset,reset:true}});offset=0;}
   if(offset===0&&(task.pageDigests||[]).includes(pagination.digest)){await api({action:'complete',taskId:task.id,leaseToken:task.leaseToken,coverage,offers:[],pagination:{...pagination,offset:0}});completed++;continue;}
-  do{const batch=offers.slice(offset,offset+20);await api({action:'complete',taskId:task.id,leaseToken:task.leaseToken,coverage,offers:batch,pagination:{...pagination,offset}});offset+=batch.length;if(offset>=offers.length)break;if(Date.now()>stopAt-5000){await api({action:'yield',taskId:task.id,leaseToken:task.leaseToken});break runLoop;}}while(true);
+  do{let batch=offers.slice(offset,offset+3);try{batch=await enrichVintedBatch(batch);}catch(e){await api({action:'fail',taskId:task.id,leaseToken:task.leaseToken,kind:e.blocked?'blocked':e.status>=500||/TIMEOUT|Timeout|fetch failed/i.test(e.message)?'temporary':'invalid',message:String(e.message).slice(0,200),retryAfterSeconds:300});failed++;continue runLoop;}await api({action:'complete',taskId:task.id,leaseToken:task.leaseToken,coverage:coverage+' ISBN sprawdzany w szczegółach przed zapisem; partie po 3 oferty.',offers:batch,pagination:{...pagination,offset}});offset+=batch.length;if(offset>=offers.length)break;if(Date.now()>stopAt-5000){await api({action:'yield',taskId:task.id,leaseToken:task.leaseToken});break runLoop;}}while(true);
   console.log(JSON.stringify({source:'Vinted',page:pagination.page,entries:offers.length,nextPage:pagination.nextPage,state:pagination.state}));completed++;continue;
  }
  // Do not replay an uncertain completed write as a failure: status/lease resolves it on the next run.
