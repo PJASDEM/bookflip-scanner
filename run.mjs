@@ -8,14 +8,14 @@ const ENDPOINT=SITE+'/api/github-scanner';
 const serviceToken=process.env.BOOKFLIP_SITES_ACCESS;
 const stopAt=Date.now()+4*60000;
 async function oidc(){const endpoint=new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL||'');if(endpoint.protocol!=='https:'||!endpoint.hostname.endsWith('.actions.githubusercontent.com'))throw Error('OIDC_ENVIRONMENT_UNAVAILABLE');endpoint.searchParams.set('audience',ENDPOINT);const r=await fetch(endpoint,{headers:{Authorization:'Bearer '+process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN},redirect:'error',signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error('OIDC_TOKEN_UNAVAILABLE');const d=await r.json();if(!d.value)throw Error('OIDC_TOKEN_UNAVAILABLE');return d.value;}
-async function main(){if(!serviceToken)throw Error('BOOKFLIP_SITES_ACCESS_MISSING');const token=await oidc();async function api(input){
+async function main(){if(!serviceToken)throw Error('BOOKFLIP_SITES_ACCESS_MISSING');const token=await oidc();let savedBatches=0;async function api(input){
  const body=input.action==='complete'?{...input,requestId:input.requestId||crypto.randomUUID()}:input;
  const retryable=['complete','status','process'].includes(body.action);
  for(let attempt=0;;attempt++){
   try{const r=await fetch(ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json','OAI-Sites-Authorization':'Bearer '+serviceToken,Authorization:'Bearer '+token},redirect:'error',body:JSON.stringify(body),signal:AbortSignal.timeout(45000)});
    const data=await r.json().catch(()=>{throw Object.assign(Error('INVALID_API_RESPONSE'),{transient:true});});
    if(!r.ok||data.error){console.error(JSON.stringify({httpStatus:r.status,code:data.error,traceId:data.traceId,action:body.action}));throw Object.assign(Error('SITE_HTTP_'+r.status),{transient:r.status>=500});}
-   return data;
+   if(body.action==='complete')savedBatches++;return data;
   }catch(e){if(!retryable||e.transient===false||attempt>=2){const code=e.name==='TimeoutError'||e.name==='AbortError'?'SITE_REQUEST_TIMEOUT':/^[A-Z0-9_]+$/.test(e.message)?e.message:'SITE_CONNECTION_FAILED';console.error(JSON.stringify({error:code,action:body.action,attempt:attempt+1}));throw Error(code);}
    console.log(JSON.stringify({retry:body.action,attempt:attempt+1}));await new Promise(r=>setTimeout(r,2000*(attempt+1)));
   }
@@ -38,7 +38,7 @@ async function main(){if(!serviceToken)throw Error('BOOKFLIP_SITES_ACCESS_MISSIN
  await api({action:'complete',taskId:task.id,leaseToken:task.leaseToken,coverage:coverage||(task.adapter==='sprzedajemy_atom'?'Publiczny kanał RSS/Atom Sprzedajemy.pl: jedna strona kanału, tylko kategoria Książki i Podręczniki, maksymalnie 20 pasujących ofert. Cena pochodzi z RSS; dostępność i cena na stronie wymagają sprawdzenia. Brak pełnego pokrycia portalu.':'Autoryzowany feed JSON odczytany przez GitHub Actions. Zakres ograniczony do treści feedu i maksymalnie 20 pasujących ofert; brak pełnego pokrycia portalu.'),offers});completed++;
  }
  if(Date.now()<stopAt-20000){try{await api({action:'enrich'});}catch{console.warn(JSON.stringify({bibliography:'deferred'}));}}
- const after=await api({action:'status'});console.log(JSON.stringify({completed,blocked,failed,processed,remaining:after.active,processing:after.processing}));
- const generation=Number(process.env.BOOKFLIP_CONTINUATION||0);if(after.automatic!==false&&((completed+processed)>0||waitingForRetry)&&(after.active>0||after.processing>0)&&Number.isInteger(generation)&&generation>=0&&generation<20&&(!waitingForRetry||(after.tasks||[]).some(t=>t.status==='retry_wait'&&t.nextAttemptAt<=Date.now()+15*60000))){await dispatchContinuation(generation+1,process.env.GITHUB_TOKEN);}
+ const after=await api({action:'status'});console.log(JSON.stringify({completed,blocked,failed,processed,savedBatches,remaining:after.active,processing:after.processing}));
+ const generation=Number(process.env.BOOKFLIP_CONTINUATION||0);if(after.automatic!==false&&((completed+processed+savedBatches)>0||waitingForRetry)&&(after.active>0||after.processing>0)&&Number.isInteger(generation)&&generation>=0&&generation<20&&(!waitingForRetry||(after.tasks||[]).some(t=>t.status==='retry_wait'&&t.nextAttemptAt<=Date.now()+15*60000))){await dispatchContinuation(generation+1,process.env.GITHUB_TOKEN);}
 }
 main().catch(e=>{console.error(JSON.stringify({error:/^[A-Z0-9_]+$/.test(e.message)?e.message:'RUNNER_FAILED'}));process.exitCode=1;});
