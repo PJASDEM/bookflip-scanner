@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['run.mjs', 'feed.mjs', '.github/workflows/bookflip-scan.yml']
+    paths: ['run.mjs', 'feed.mjs', 'marketplaces.mjs', 'reference-parsers.mjs', 'rss.mjs', '.github/workflows/bookflip-scan.yml']
 permissions:
   contents: read
   id-token: write
