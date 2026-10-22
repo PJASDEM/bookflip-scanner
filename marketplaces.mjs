@@ -1,4 +1,4 @@
-import {bibliographicMetadata} from '../lib/isbn.mjs';
+import {bibliographicMetadata} from './isbn.mjs';
 import {createHash} from 'node:crypto';
 import {setTimeout as wait} from 'node:timers/promises';
 import {parseVinted,parseAllegroListing,parseOlx,rscText,objectAt} from './reference-parsers.mjs';
