@@ -28,7 +28,7 @@ export function parseMarketplace(html,task,observedAt=new Date().toISOString()){
   let recognized=false;for(const m of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)){try{const d=JSON.parse(m[1]);if(Array.isArray(d.offers?.offers))recognized=true;}catch{}}
   if(!recognized)throw Error('UNRECOGNIZED_MARKETPLACE_DATA');rows=parseOlx(html,book,observedAt);
  }}catch(e){if(e.message==='UNRECOGNIZED_MARKETPLACE_DATA')throw e;throw Error('UNRECOGNIZED_MARKETPLACE_DATA');}
- const out=[],seen=new Set();for(const row of rows){if(row.available===false)continue;let u;try{u=new URL(row.url);}catch{continue;}if(u.protocol!=='https:'||![task.host,task.host.replace(/^www\./,'')].includes(u.hostname)||u.username||u.password||u.port||!u.pathname.startsWith(sources[task.source].path))continue;
+ const out=[],seen=new Set();for(const row of rows){if(row.available===false&&row.availabilityKnown!==false)continue;let u;try{u=new URL(row.url);}catch{continue;}if(u.protocol!=='https:'||![task.host,task.host.replace(/^www\./,'')].includes(u.hostname)||u.username||u.password||u.port||!u.pathname.startsWith(sources[task.source].path))continue;
   if(task.source==='Vinted'&&!/^\/items\/\d+/.test(u.pathname))continue;
   u.search='';u.hash='';if(seen.has(u.href))continue;seen.add(u.href);const price=Math.round(row.price*100);if(!Number.isSafeInteger(price)||price<=0||price>100000000)continue;
   out.push({title:row.title.slice(0,500),url:u.href,price,observedAt,activeConfirmed:false,priceConfirmed:false,availability:'unconfirmed',priceEvidence:'marketplace_listing'});if(out.length===20)break;
