@@ -1,3 +1,4 @@
+import {dispatchContinuation} from './continuation.mjs';
 import {enrichVintedBatch} from './vinted-detail.mjs';
 import {fetchFeed,selectOffers} from './feed.mjs';
 import {sprzedajemyFeedUrl,parseSprzedajemyAtom} from './rss.mjs';
@@ -5,11 +6,23 @@ import {scanMarketplace} from './marketplaces.mjs';
 const SITE='https://bookflip.karnol13.chatgpt.site';
 const ENDPOINT=SITE+'/api/github-scanner';
 const serviceToken=process.env.BOOKFLIP_SITES_ACCESS;
-const stopAt=Date.now()+75000;
+const stopAt=Date.now()+4*60000;
 async function oidc(){const endpoint=new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL||'');if(endpoint.protocol!=='https:'||!endpoint.hostname.endsWith('.actions.githubusercontent.com'))throw Error('OIDC_ENVIRONMENT_UNAVAILABLE');endpoint.searchParams.set('audience',ENDPOINT);const r=await fetch(endpoint,{headers:{Authorization:'Bearer '+process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN},redirect:'error',signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error('OIDC_TOKEN_UNAVAILABLE');const d=await r.json();if(!d.value)throw Error('OIDC_TOKEN_UNAVAILABLE');return d.value;}
-async function main(){if(!serviceToken)throw Error('BOOKFLIP_SITES_ACCESS_MISSING');const token=await oidc();async function api(body){let r;try{r=await fetch(ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json','OAI-Sites-Authorization':'Bearer '+serviceToken,Authorization:'Bearer '+token},redirect:'error',body:JSON.stringify(body),signal:AbortSignal.timeout(30000)});}catch(e){const code=e.name==='TimeoutError'||e.name==='AbortError'?'SITE_REQUEST_TIMEOUT':'SITE_CONNECTION_FAILED';console.error(JSON.stringify({error:code,action:body.action}));throw Error(code);}const data=await r.json().catch(()=>({error:'INVALID_API_RESPONSE'}));if(!r.ok||data.error){let detail=String(data.message||'').split(serviceToken).join('[REDACTED]').split(token).join('[REDACTED]').replace(/[A-Za-z0-9_\-]{40,}/g,'[REDACTED]').slice(0,300);console.error(JSON.stringify({httpStatus:r.status,code:data.error,detail}));throw Error(data.error||'SITE_HTTP_'+r.status);}return data;}
- const before=await api({action:'ensure'});console.log(JSON.stringify({connection:'ok',active:before.active}));let completed=0,blocked=0,failed=0;
- runLoop: while(Date.now()<stopAt-20000){const {task}=await api({action:'claim'});if(!task)break;if(task.adapter!=='marketplace_html'&&task.adapter!=='sprzedajemy_atom'&&(task.adapter!=='json_feed'||!task.feedUrl)){await api({action:'fail',taskId:task.id,leaseToken:task.leaseToken,kind:'blocked',message:'SOURCE_NOT_CONFIGURED: brak dopuszczonego feedu JSON. Skonfiguruj źródło na stronie BookFlip; nie uruchomiono scrapingu.'});blocked++;continue;}
+async function main(){if(!serviceToken)throw Error('BOOKFLIP_SITES_ACCESS_MISSING');const token=await oidc();async function api(input){
+ const body=input.action==='complete'?{...input,requestId:input.requestId||crypto.randomUUID()}:input;
+ const retryable=['complete','status','process'].includes(body.action);
+ for(let attempt=0;;attempt++){
+  try{const r=await fetch(ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json','OAI-Sites-Authorization':'Bearer '+serviceToken,Authorization:'Bearer '+token},redirect:'error',body:JSON.stringify(body),signal:AbortSignal.timeout(45000)});
+   const data=await r.json().catch(()=>{throw Object.assign(Error('INVALID_API_RESPONSE'),{transient:true});});
+   if(!r.ok||data.error){console.error(JSON.stringify({httpStatus:r.status,code:data.error,traceId:data.traceId,action:body.action}));throw Object.assign(Error('SITE_HTTP_'+r.status),{transient:r.status>=500});}
+   return data;
+  }catch(e){if(!retryable||e.transient===false||attempt>=2){const code=e.name==='TimeoutError'||e.name==='AbortError'?'SITE_REQUEST_TIMEOUT':/^[A-Z0-9_]+$/.test(e.message)?e.message:'SITE_CONNECTION_FAILED';console.error(JSON.stringify({error:code,action:body.action,attempt:attempt+1}));throw Error(code);}
+   console.log(JSON.stringify({retry:body.action,attempt:attempt+1}));await new Promise(r=>setTimeout(r,2000*(attempt+1)));
+  }
+ }
+}
+ const before=await api({action:'ensure'});console.log(JSON.stringify({connection:'ok',active:before.active}));if(before.automatic===false){console.log('Automatic scanner is paused.');return;}let completed=0,blocked=0,failed=0,processed=0;
+ runLoop: while(Date.now()<stopAt-20000){const work=await api({action:'process'});processed+=work.processed||0;const {task}=await api({action:'claim'});if(!task){if(work.processed)continue;break;}if(task.adapter!=='marketplace_html'&&task.adapter!=='sprzedajemy_atom'&&(task.adapter!=='json_feed'||!task.feedUrl)){await api({action:'fail',taskId:task.id,leaseToken:task.leaseToken,kind:'blocked',message:'SOURCE_NOT_CONFIGURED: brak dopuszczonego feedu JSON. Skonfiguruj źródło na stronie BookFlip; nie uruchomiono scrapingu.'});blocked++;continue;}
  let offers,coverage,pagination;try{if(task.adapter==='marketplace_html'){const result=await scanMarketplace(task);offers=result.offers;coverage=result.coverage;pagination=result.pagination;}else if(task.adapter==='sprzedajemy_atom'){if(task.source!=='Sprzedajemy.pl'||task.host!=='sprzedajemy.pl')throw Error('UNTRUSTED_RSS_TASK');const feed=await fetchFeed(sprzedajemyFeedUrl(task),{format:'atom'});offers=parseSprzedajemyAtom(feed,task);}else{const feed=await fetchFeed(task.feedUrl);offers=selectOffers(feed,task);}}catch(e){const temporary=!e.blocked&&[500,502,503,504].includes(e.status)||!e.blocked&&/TIMEOUT|Timeout|ECONNRESET|ETIMEDOUT|ENOTFOUND/.test(e.message);await api({action:'fail',taskId:task.id,leaseToken:task.leaseToken,kind:temporary?'temporary':'blocked',message:String(e.message).slice(0,200),retryAfterSeconds:e.retryAfter||300});failed++;continue;}
  if(pagination){
   let offset=task.pageOffset||0;
@@ -22,5 +35,7 @@ async function main(){if(!serviceToken)throw Error('BOOKFLIP_SITES_ACCESS_MISSIN
  await api({action:'complete',taskId:task.id,leaseToken:task.leaseToken,coverage:coverage||(task.adapter==='sprzedajemy_atom'?'Publiczny kanał RSS/Atom Sprzedajemy.pl: jedna strona kanału, tylko kategoria Książki i Podręczniki, maksymalnie 20 pasujących ofert. Cena pochodzi z RSS; dostępność i cena na stronie wymagają sprawdzenia. Brak pełnego pokrycia portalu.':'Autoryzowany feed JSON odczytany przez GitHub Actions. Zakres ograniczony do treści feedu i maksymalnie 20 pasujących ofert; brak pełnego pokrycia portalu.'),offers});completed++;
  }
  if(Date.now()<stopAt-20000){try{await api({action:'enrich'});}catch{console.warn(JSON.stringify({bibliography:'deferred'}));}}
- const after=await api({action:'status'});console.log(JSON.stringify({completed,blocked,failed,remaining:after.active}));}
+ const after=await api({action:'status'});console.log(JSON.stringify({completed,blocked,failed,processed,remaining:after.active,processing:after.processing}));
+ const generation=Number(process.env.BOOKFLIP_CONTINUATION||0);if(after.automatic!==false&&(completed+processed)>0&&(after.active>0||after.processing>0)&&Number.isInteger(generation)&&generation>=0&&generation<20){await dispatchContinuation(generation+1,process.env.GITHUB_TOKEN);}
+}
 main().catch(e=>{console.error(JSON.stringify({error:/^[A-Z0-9_]+$/.test(e.message)?e.message:'RUNNER_FAILED'}));process.exitCode=1;});
