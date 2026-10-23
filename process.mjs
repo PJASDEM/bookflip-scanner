@@ -11,7 +11,7 @@ export async function drainProcessing(api,{now=Date.now,budgetMs=4*60000,log=con
  while(now()<stopAt-15000){
   if(now()-lastStatus>=30000){state=await api({action:'status',worker:'processing'});lastStatus=now();if(state.automatic===false){reason='paused';break;}}
   const batch=await api({action:'process',worker:'processing'});processed+=batch.processed||0;failed+=batch.failed||0;batches++;
-  log(JSON.stringify({worker:'processing',batch:batches,processed:batch.processed||0,failed:batch.failed||0,durationMs:batch.durationMs}));
+  log(JSON.stringify({worker:'processing',batch:batches,processed:batch.processed||0,failed:batch.failed||0,durationMs:batch.durationMs,claimed:batch.claimed,catalogLoadMs:batch.catalogLoadMs}));
   if(!(batch.processed||batch.failed)){reason='waiting_or_empty';break;}
  }
  state=await api({action:'status',worker:'processing'});

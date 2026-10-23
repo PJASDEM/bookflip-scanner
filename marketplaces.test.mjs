@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {parseMarketplace,searchUrl,readSourceHtml,acceptsBook,vintedPageInfo,scanMarketplace} from './marketplaces.mjs';
+import {parseMarketplace,searchUrl,readSourceHtml,acceptsBook,vintedPageInfo,scanMarketplace,retryAfterSeconds} from './marketplaces.mjs';
 const task=(source,mode='discovery',title='Horus Rising')=>({source,host:source==='Vinted'?'www.vinted.pl':source==='OLX'?'www.olx.pl':'allegrolokalnie.pl',mode,title,category:'Warhammer 40K'});
 const ld=d=>'<script type="application/ld+json">'+JSON.stringify(d)+'</script>';
 const rsc=products=>'<script>self.__next_f.push('+JSON.stringify([1,products.map(productItem=>JSON.stringify({productItem})).join('')])+')</script>';
@@ -13,5 +13,29 @@ test('CAPTCHA is blocked and redirects cannot change source host',async()=>{awai
 test('Vinted pagination follows source metadata, rejects a mismatched page and distinguishes missing metadata',()=>{const t={...task('Vinted'),paginationVersion:1,page:2};const make=p=>'<script>self.__next_f.push('+JSON.stringify([1,JSON.stringify({pagination:p})])+')</script>';assert.equal(new URL(searchUrl(t)).searchParams.get('page'),'2');const p=vintedPageInfo(make({currentPage:2,totalPages:3}),t);assert.equal(p.nextPage,3);assert.equal(vintedPageInfo(make({currentPage:2,totalPages:2}),t).state,'end');assert.equal(vintedPageInfo('<html/>',t).state,'unknown');assert.throws(()=>vintedPageInfo(make({currentPage:1,totalPages:3}),t),/PAGE_NOT_MATCHED/);});
 test('a paginated Vinted page retains all entries beyond the previous twenty-item limit',async()=>{const products=Array.from({length:46},(_,i)=>({title:'Warhammer książka '+i,url:'/items/'+(123000+i)+'-book',price:{amount:'20',currencyCode:'PLN'}}));const t={...task('Vinted'),paginationVersion:1,page:1};const html=rsc(products)+'<script>self.__next_f.push('+JSON.stringify([1,JSON.stringify({pagination:{currentPage:1,totalPages:2}})])+')</script>';const r=await scanMarketplace(t,{pause:async()=>{},fetcher:async()=>new Response(html,{headers:{'content-type':'text/html'}})});assert.equal(r.offers.length,46);assert.equal(r.pagination.total,46);assert.equal(r.pagination.nextPage,2);assert.equal(r.pagination.digest.length,64);});
 
+test('Retry-After supports seconds and HTTP dates, with a conservative fallback',()=>{const now=Date.parse('2026-10-22T12:00:00Z');assert.equal(retryAfterSeconds('120',now),120);assert.equal(retryAfterSeconds('Thu, 22 Oct 2026 12:05:00 GMT',now),300);assert.equal(retryAfterSeconds(null,now),30);assert.equal(retryAfterSeconds('invalid',now),30);});
+
 test('403 challenge remains terminal even when Retry-After is provided',async()=>{await assert.rejects(()=>readSourceHtml(searchUrl(task('Vinted')),{source:'Vinted',pause:async()=>{},fetcher:async()=>new Response('<title>Verify you are human</title>',{status:403,headers:{'retry-after':'120'}})}),e=>e.blocked===true&&e.message==='SOURCE_CAPTCHA'&&!e.retryable);});
 test('403 preserves provider Retry-After for source cooldown',async()=>{await assert.rejects(()=>readSourceHtml(searchUrl(task('Vinted')),{source:'Vinted',pause:async()=>{},fetcher:async()=>new Response('Forbidden',{status:403,headers:{'retry-after':'180'}})}),e=>e.retryable===true&&e.retryAfter===180);});
+
+test('Allegro odczytuje całą stronę i podąża tylko za potwierdzonym linkiem next',async()=>{
+ const products=Array.from({length:46},(_,i)=>({'@type':'Book',name:'Warhammer książka '+i,offers:{'@type':'Offer',price:20,priceCurrency:'PLN',url:'https://allegrolokalnie.pl/oferta/book-'+i}}));
+ const t={...task('Allegro Lokalnie'),paginationVersion:1,page:1};
+ const html=ld({'@graph':products})+'<a rel="next" href="/oferty/q/Warhammer%20ksi%C4%85%C5%BCki?page=2">Następna</a>';
+ const r=await scanMarketplace(t,{pause:async()=>{},fetcher:async()=>new Response(html,{headers:{'content-type':'text/html'}})});
+ assert.equal(r.offers.length,46);assert.equal(r.pagination.nextPage,2);assert.equal(new URL(searchUrl({...t,page:2})).searchParams.get('page'),'2');
+ for(const href of ['https://evil.example/oferty?page=2','/oferty/q/inne?page=2','/oferty/q/Warhammer%20ksi%C4%85%C5%BCki?page=9']){
+  const invalid=await scanMarketplace(t,{pause:async()=>{},fetcher:async()=>new Response(ld({'@graph':products})+'<a rel="next" href="'+href+'">next</a>',{headers:{'content-type':'text/html'}})});
+  assert.equal(invalid.pagination.state,'unknown');
+ }
+});
+test('OLX odróżnia brak paginacji od jawnie wyłączonej następnej strony',async()=>{
+ const t={...task('OLX'),paginationVersion:1,page:2},page=ld({offers:{offers:[]}});
+ for(const [suffix,state] of [['','unknown'],['<button aria-label="Następna" disabled>next</button>','end']]){
+  const r=await scanMarketplace(t,{pause:async()=>{},fetcher:async()=>new Response(page+suffix,{headers:{'content-type':'text/html'}})});assert.equal(r.pagination.state,state);
+ }
+});
+test('zmiana kolejności tych samych ofert zmienia fingerprint strony',()=>{
+ const one={title:'Warhammer książka',url:'/items/12345',price:{amount:'20',currencyCode:'PLN'}},two={...one,url:'/items/12346'};
+ assert.notEqual(vintedPageInfo(rsc([one,two]),{...task('Vinted'),paginationVersion:1,page:1}).digest,vintedPageInfo(rsc([two,one]),{...task('Vinted'),paginationVersion:1,page:1}).digest);
+});

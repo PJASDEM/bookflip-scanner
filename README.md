@@ -12,7 +12,7 @@ Na polecenie właściciela przeniesiono czytniki HTML Vinted, Allegro Lokalnie i
 
 Transport jest osobny: stałe domeny, maksymalnie 20 kandydatów w pojedynczym zapisie, 18 sekund na odczyt, limit 4 MB, co najmniej 2 sekundy między żądaniami danego źródła. HTTP 429 wstrzymuje całe źródło zgodnie z Retry-After i narastającym opóźnieniem. HTTP 403 bez rozpoznanej strony weryfikacji ponawiamy maksymalnie 5 razy: po 1, 2, 4, 8 i 15 minutach (lub później, gdy wymaga tego Retry-After). Udany zapis partii zeruje licznik. Zachowujemy checkpoint strony i partii. CAPTCHA i wyczerpanie prób 403 zatrzymują źródło; harmonogram pomija je do ręcznego uruchomienia. Nie ma proxy, zmiany adresów IP, sesji logowania ani obchodzenia mechanizmów ochrony. Awaria nie dezaktywuje istniejących ofert.
 
-Vinted ma stronicowanie: nowy skan zaczyna od strony 1, a kolejne przebiegi wznawiają tę samą kolejkę ze strony i partii zapisanej w D1. Limit 20 dotyczy pojedynczej transakcji importu, a nie całej strony ani zapytania. Cała rozpoznana strona jest przetwarzana partiami. Dopiero ostatnia partia zatwierdza przejście do kolejnej strony. Postęp i oferty zapisują się atomowo; powtórzenie checkpointu nie powiela zapisu. Numer następnej strony wynika z metadanych lub poprawnego linku Vinted, nigdy z samej liczby wyników. Powtórzona strona i nierozpoznana paginacja kończą etap z oznaczeniem niepełnego zakresu. Znana ostatnia strona ma osobny status. Pozostałe czytniki nadal odczytują jedną stronę i maksymalnie 20 kandydatów.
+Vinted ma stronicowanie: nowy skan zaczyna od strony 1, a kolejne przebiegi wznawiają tę samą kolejkę ze strony i partii zapisanej w D1. Limit 20 dotyczy pojedynczej transakcji importu, a nie całej strony ani zapytania. Cała rozpoznana strona jest przetwarzana partiami. Dopiero ostatnia partia zatwierdza przejście do kolejnej strony. Postęp i oferty zapisują się atomowo; powtórzenie checkpointu nie powiela zapisu. Numer następnej strony wynika z metadanych lub poprawnego linku Vinted, nigdy z samej liczby wyników. Powtórzona strona i nierozpoznana paginacja kończą etap z oznaczeniem niepełnego zakresu. Znana ostatnia strona ma osobny status. Nowe zadania Allegro Lokalnie i OLX również zapisują całą rozpoznaną stronę partiami i podążają za potwierdzonym linkiem następnej strony tego samego zapytania. Brak rozpoznanej paginacji kończy skan z niepełnym zakresem; blokady 403/CAPTCHA pozostają respektowane. Stare zadania bez wersji paginacji zachowują limit 20.
 
 Między stronami kolejka ustępuje innym zapytaniom. Próby po błędzie liczone są dla bieżącej strony. Budżet jednego przebiegu GitHub pozostaje ograniczony; niekompletna strona zachowuje zapisany offset, a wykonawca oddaje rezerwację przed zakończeniem. Po awarii odzyskiwana jest wygasła rezerwacja. Zmieniona strona jest czytana ponownie od początku z deduplikacją. Fingerprint ostatnich 100 stron zapobiega pętli; walidacja dopuszcza numery stron 1–10000. Zmiany kolejności ofert w portalu mogą powodować pominięcia i duplikaty, dlatego przejście wszystkich dostępnych stron nie jest gwarancją pełnego pokrycia rynku.
 
@@ -31,3 +31,17 @@ Opcjonalny autoryzowany feed JSON zastępuje czytnik HTML danego portalu. DNS i 
 Pojedynczy przebieg ma limit 2 minut, pętla trwa do 75 sekund. Harmonogram godzinny to do ok. 1488 minut miesięcznie przy pełnym wykorzystaniu limitu w 31-dniowym miesiącu, plus ręczne uruchomienia. Nie skonfigurowano płatnych runnerów. Prywatne Actions korzystają z limitów konta GitHub, które trzeba kontrolować; ta konfiguracja nie włącza opłat ponad limit.
 
 Etapy zakończone są zapisywane atomowo. Po błędach przejściowych obowiązuje backoff i maksymalnie 3 próby. Odmowa dostępu zatrzymuje etap. Błąd nie usuwa istniejących ofert. W logach są wyłącznie statusy i liczniki.
+
+## Separate matching worker
+
+`workflow.yml` is the source for `.github/workflows/bookflip-scan.yml` in
+`PJASDEM/bookflip-scanner`. The hourly scan and the matching worker use separate
+job concurrency groups. The matching job also runs every five minutes, consumes
+only `status` and `process`, and drains successive batches of up to ten offers for up to
+four minutes. It never waits for marketplace HTTP or scans new pages. Empty,
+paused, or retry-delayed queues exit without a busy loop. Unfinished work remains
+in D1 for the next scheduled run; matching has no continuation-generation limit.
+The schedule can be delayed by GitHub. Both jobs retain the existing OIDC trust
+boundary and Sites access secret. `process.mjs` needs no GitHub write token.
+
+JSON przekazuje wyłącznie walidowane pola bibliograficzne, w tym ISBN10/13, listę ISBN, autorów, opis, OCR i niepewność odczytu. Nie przekazuje pól decyzji ani kolejki. Nowe zadania przetwarzają cały odczytany dokument (maks. 1000 wpisów) partiami po 3, bez automatycznego podążania za zewnętrznymi URL feedów. Kwoty pozostają PLN; jawne inne waluty są pomijane. Fingerprint strony obejmuje kolejność ofert.

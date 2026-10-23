@@ -1,5 +1,5 @@
 export const cleanISBN=v=>String(v||'').replace(/^(?:ISBN(?:-1[03])?\s*:?\s*)/i,'').replace(/[-\s]/g,'').toUpperCase();
-export function isbnValid(v){const s=cleanISBN(v);if(!s)return true;if(/^\d{13}$/.test(s))return [...s].reduce((n,x,i)=>n+Number(x)*(i%2?3:1),0)%10===0;if(/^\d{9}[\dX]$/.test(s))return [...s].reduce((n,x,i)=>n+(x==='X'?10:Number(x))*(10-i),0)%11===0;return false;}
+export function isbnValid(v){const s=cleanISBN(v);if(!s)return true;if(/^97[89]\d{10}$/.test(s))return [...s].reduce((n,x,i)=>n+Number(x)*(i%2?3:1),0)%10===0;if(/^\d{9}[\dX]$/.test(s))return [...s].reduce((n,x,i)=>n+(x==='X'?10:Number(x))*(10-i),0)%11===0;return false;}
 export function isbnKeys(v){const s=cleanISBN(v);if(!s||!isbnValid(s))return [];if(s.length===10){const stem='978'+s.slice(0,9),sum=[...stem].reduce((n,x,i)=>n+Number(x)*(i%2?3:1),0);return [s,stem+(10-sum%10)%10];}if(s.startsWith('978')){const stem=s.slice(3,12),sum=[...stem].reduce((n,x,i)=>n+Number(x)*(10-i),0),check=(11-sum%11)%11;return [s,stem+(check===10?'X':check)];}return [s];}
 
 // Read evidence, never infer an ISBN from a title or repair guessed digits.
@@ -27,6 +27,10 @@ export function extractOfferISBN(o={}){
 export function bibliographicMetadata(row={}){
  const result={};const limits={isbn:100,isbn_10:100,isbn_13:100,author:500,publisher:500,language:100,binding:100,variant:200,series:300,volume:100,description:10000,ocrText:5000,isbnEvidence:100};
  for(const [field,limit] of Object.entries(limits))if(row[field]!=null){if(typeof row[field]!=='string'||row[field].length>limit)throw Error('Nieprawidłowe pole bibliograficzne: '+field);result[field]=row[field].trim();}
+ for(const field of ['isbns','authors'])if(row[field]!=null){
+  if(!Array.isArray(row[field])||row[field].length>20||row[field].some(v=>typeof v!=='string'||v.length>(field==='isbns'?100:500)))throw Error('Nieprawidłowe pole bibliograficzne: '+field);
+  result[field]=row[field].map(v=>v.trim());
+ }
  if(row.parameters!=null){if(typeof row.parameters!=='object'||JSON.stringify(row.parameters).length>20000)throw Error('Nieprawidłowe parametry oferty.');result.parameters=JSON.parse(JSON.stringify(row.parameters));}
  if(row.year!=null){if(!Number.isInteger(row.year)||row.year<1400||row.year>2100)throw Error('Nieprawidłowy rok wydania.');result.year=row.year;}
  if(row.isbnReadUncertain!=null){if(typeof row.isbnReadUncertain!=='boolean')throw Error('Nieprawidłowy status odczytu ISBN.');result.isbnReadUncertain=row.isbnReadUncertain;}

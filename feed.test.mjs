@@ -5,3 +5,20 @@ test('blokuje prywatne i zastrzeżone adresy',()=>{for(const ip of ['127.0.0.1',
 test('odrzuca niebezpieczne feedy przed odczytem',async()=>{for(const u of ['http://example.com','https://127.0.0.1','https://example.com/?api_key=secret','https://feed.local/'])await assert.rejects(()=>fetchFeed(u));await assert.rejects(()=>fetchFeed('https://example.org/feed',{lookup:async()=>[{address:'127.0.0.1',family:4}]}));});
 test('importuje tylko aktywne, aktualne, tematyczne oferty danego źródła',()=>{const good={title:'Warcraft Dzień Smoka',url:'https://www.vinted.pl/items/123-book',price:3000,active:true,observedAt:new Date().toISOString()};const task={mode:'discovery',category:'Warcraft',host:'www.vinted.pl'};const rows=selectOffers([good,{...good,active:false},{...good,url:'https://evil.example/items/2'},{...good,title:'Buty'},{...good,price:-1},{...good,observedAt:'2000-01-01'},good],task);assert.equal(rows.length,1);assert.equal(rows[0].price,3000);});
 test('Retry-After jest ograniczony',()=>{assert.equal(parseRetryAfter('120'),120);assert.equal(parseRetryAfter('9999999'),86400);});
+
+test('JSON zachowuje odczytane ISBN, opis, autorów i niepewność bez pól sterujących',()=>{
+ const row={title:'Warcraft Dzień Smoka',url:'https://www.vinted.pl/items/123-test',price:3000,active:true,observedAt:new Date().toISOString(),isbn:'9780306406157',isbn_10:'0306406152',isbns:['9780306406157'],authors:['TEST Autor'],description:'ISBN 9780306406157',volume:'2',isbnReadUncertain:true,parameters:{ISBN:'9780306406157'},editionId:'forged',verified:true,scanProcessing:{status:'completed'}};
+ const [r]=selectOffers([row],{mode:'discovery',category:'Warcraft',host:'www.vinted.pl'});
+ for(const key of ['isbn','isbn_10','isbns','authors','description','volume','parameters','isbnReadUncertain'])assert.deepEqual(r[key],row[key]);
+ for(const key of ['editionId','verified','scanProcessing'])assert.equal(r[key],undefined);
+});
+test('pełny dokument JSON udostępnia ponad 20 ofert i deduplikuje Vinted po ID',()=>{
+ const base={title:'Warcraft',price:1000,active:true,observedAt:new Date().toISOString()},task={mode:'discovery',category:'Warcraft',host:'www.vinted.pl'};
+ const rows=Array.from({length:47},(_,i)=>({...base,url:'https://www.vinted.pl/items/'+(1000+i)+'-test'}));
+ assert.equal(selectOffers(rows,task,Date.now(),1000).length,47);assert.equal(selectOffers(rows,task).length,20);
+ assert.equal(selectOffers([rows[0],{...rows[0],url:'https://www.vinted.pl/items/1000-new?tracking=1'},{...rows[1],currency:'EUR'}],task).length,1);
+});
+test('JSON odrzuca nieprawidłowe typy metadanych',()=>{
+ const row={title:'Warcraft',url:'https://www.vinted.pl/items/123-test',price:1000,active:true,observedAt:new Date().toISOString()};
+ for(const extra of [{isbn:123},{authors:[{}]},{isbns:['x'.repeat(101)]}])assert.throws(()=>selectOffers([{...row,...extra}],{mode:'discovery',category:'Warcraft',host:'www.vinted.pl'}),/bibliograficzne/);
+});
