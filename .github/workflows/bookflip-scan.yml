@@ -2,6 +2,7 @@ name: BookFlip Scanner
 on:
   schedule:
     - cron: '17 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
     inputs:
       continuation:
@@ -9,26 +10,41 @@ on:
         default: '0'
   push:
     branches: [main]
-    paths: ['run.mjs', 'continuation.mjs', 'feed.mjs', 'marketplaces.mjs', 'reference-parsers.mjs', 'rss.mjs', '.github/workflows/bookflip-scan.yml']
+    paths: ['run.mjs', 'process.mjs', 'continuation.mjs', 'feed.mjs', 'marketplaces.mjs', 'reference-parsers.mjs', 'rss.mjs', '.github/workflows/bookflip-scan.yml']
 permissions:
   contents: read
   actions: write
   id-token: write
-concurrency:
-  group: bookflip-scanner
-  cancel-in-progress: false
 jobs:
   scan:
-    if: github.repository == 'PJASDEM/bookflip-scanner' && github.ref == 'refs/heads/main'
+    if: github.repository == 'PJASDEM/bookflip-scanner' && github.ref == 'refs/heads/main' && (github.event_name != 'schedule' || github.event.schedule == '17 * * * *')
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: bookflip-scanner
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Run bounded BookFlip queue
+      - name: Run bounded BookFlip scan
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BOOKFLIP_CONTINUATION: ${{ inputs.continuation || '0' }}
           BOOKFLIP_SITES_ACCESS: ${{ secrets.BOOKFLIP_SITES_ACCESS }}
         run: node run.mjs
+  process:
+    if: github.repository == 'PJASDEM/bookflip-scanner' && github.ref == 'refs/heads/main' && (github.event_name != 'workflow_dispatch' || inputs.continuation == '' || inputs.continuation == '0')
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    concurrency:
+      group: bookflip-processing
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Drain matching and valuation queue
+        env:
+          BOOKFLIP_SITES_ACCESS: ${{ secrets.BOOKFLIP_SITES_ACCESS }}
+        run: node process.mjs
