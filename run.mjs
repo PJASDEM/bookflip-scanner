@@ -22,7 +22,7 @@ async function main(){if(!serviceToken)throw Error('BOOKFLIP_SITES_ACCESS_MISSIN
  }
 }
  const before=await api({action:'ensure'});console.log(JSON.stringify({connection:'ok',active:before.active}));if(before.automatic===false){console.log('Automatic scanner is paused.');return;}let completed=0,blocked=0,failed=0,processed=0,waitingForRetry=false;
- runLoop: while(Date.now()<stopAt-20000){const work=await api({action:'process'});processed+=work.processed||0;const claimed=await api({action:'claim'}),task=claimed.task;if(!task){if(work.processed)continue;
+ runLoop: while(Date.now()<stopAt-20000){const claimed=await api({action:'claim'}),task=claimed.task;if(!task){
  const pending=(claimed.tasks||[]).filter(t=>t.status==='retry_wait'&&t.nextAttemptAt>Date.now());
  if(pending.length){const until=Math.min(...pending.map(t=>t.nextAttemptAt));waitingForRetry=true;console.log(JSON.stringify({waiting:'source_cooldown',retryAt:new Date(until).toISOString()}));await new Promise(r=>setTimeout(r,Math.min(30000,Math.max(1000,until-Date.now()),Math.max(1,stopAt-Date.now()-20000))));continue;}
  break;}waitingForRetry=false;if(task.adapter!=='marketplace_html'&&task.adapter!=='sprzedajemy_atom'&&(task.adapter!=='json_feed'||!task.feedUrl)){await api({action:'fail',taskId:task.id,leaseToken:task.leaseToken,kind:'blocked',message:'SOURCE_NOT_CONFIGURED: brak dopuszczonego feedu JSON. Skonfiguruj źródło na stronie BookFlip; nie uruchomiono scrapingu.'});blocked++;continue;}
@@ -39,6 +39,6 @@ async function main(){if(!serviceToken)throw Error('BOOKFLIP_SITES_ACCESS_MISSIN
  }
  if(Date.now()<stopAt-20000){try{await api({action:'enrich'});}catch{console.warn(JSON.stringify({bibliography:'deferred'}));}}
  const after=await api({action:'status'});console.log(JSON.stringify({completed,blocked,failed,processed,savedBatches,remaining:after.active,processing:after.processing}));
- const generation=Number(process.env.BOOKFLIP_CONTINUATION||0);if(after.automatic!==false&&((completed+processed+savedBatches)>0||waitingForRetry)&&(after.active>0||after.processing>0)&&Number.isInteger(generation)&&generation>=0&&generation<20&&(!waitingForRetry||(after.tasks||[]).some(t=>t.status==='retry_wait'&&t.nextAttemptAt<=Date.now()+15*60000))){await dispatchContinuation(generation+1,process.env.GITHUB_TOKEN);}
+ const generation=Number(process.env.BOOKFLIP_CONTINUATION||0);if(after.automatic!==false&&((completed+processed+savedBatches)>0||waitingForRetry)&&after.active>0&&Number.isInteger(generation)&&generation>=0&&generation<20&&(!waitingForRetry||(after.tasks||[]).some(t=>t.status==='retry_wait'&&t.nextAttemptAt<=Date.now()+15*60000))){await dispatchContinuation(generation+1,process.env.GITHUB_TOKEN);}
 }
 main().catch(e=>{console.error(JSON.stringify({error:/^[A-Z0-9_]+$/.test(e.message)?e.message:'RUNNER_FAILED'}));process.exitCode=1;});
