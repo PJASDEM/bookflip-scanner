@@ -11,20 +11,30 @@ export function retryAfterSeconds(header,now=Date.now()){
  return Number.isFinite(seconds)&&seconds>=0?Math.max(30,Math.ceil(seconds)):30;
 }
 const lastReads=new Map();
+const sourceChallenge=html=>/verify (?:that )?you are human|access denied|just a moment\.\.\.|attention required|<title>[^<]*(?:captcha|verification)|potwierd[zź],? [zż]e jeste[sś] cz[lł]owiekiem/i.test(html)||html.length<100000&&/captcha|datadome.*challenge/i.test(html);
+async function readBody(response,limit=4000000){
+ if(!response.body)return '';
+ const reader=response.body.getReader(),chunks=[];let size=0;
+ try{for(;;){const {value,done}=await reader.read();if(done)break;size+=value.byteLength;if(size>limit)throw Error('SOURCE_TOO_LARGE');chunks.push(value);}}finally{await reader.cancel().catch(()=>{});}
+ const buffer=new Uint8Array(size);let offset=0;for(const chunk of chunks){buffer.set(chunk,offset);offset+=chunk.length;}return new TextDecoder().decode(buffer);
+}
 export async function readSourceHtml(raw,{fetcher=fetch,source,pause=wait,now=Date.now}={}){
  const config=sources[source];if(!config)throw Error('UNTRUSTED_MARKETPLACE_TASK');const allowed=h=>h===config.host||h===config.host.replace(/^www\./,'');let url=new URL(raw);const signal=AbortSignal.timeout(18000);
  for(let hop=0;hop<4;hop++){
   if(url.protocol!=='https:'||!allowed(url.hostname)||url.username||url.password||url.port)throw Error('UNSAFE_SOURCE_REDIRECT');
   await pause(Math.max(0,(lastReads.get(source)||0)+2000-now()),undefined,{signal});lastReads.set(source,now());
   const response=await fetcher(url,{headers:{Accept:'text/html','User-Agent':'BookFlip/1.0 (book price comparison)'},redirect:'manual',signal});
-  if([403,429].includes(response.status)){const retryAfter=retryAfterSeconds(response.headers.get('retry-after'),now());await response.body?.cancel();throw Object.assign(Error('SOURCE_HTTP_'+response.status),{status:response.status,blocked:response.status===403,retryable:response.status===429,retryAfter});}
+  if([403,429].includes(response.status)){
+   const retryAfter=retryAfterSeconds(response.headers.get('retry-after'),now());
+   if(response.status===403){const html=await readBody(response,100000);if(sourceChallenge(html))throw Object.assign(Error('SOURCE_CAPTCHA'),{blocked:true,status:403});}
+   else await response.body?.cancel();
+   throw Object.assign(Error('SOURCE_HTTP_'+response.status),{status:response.status,blocked:false,retryable:true,retryAfter});
+  }
   if([301,302,303,307,308].includes(response.status)){const location=response.headers.get('location');await response.body?.cancel();if(!location)throw Error('SOURCE_REDIRECT_MISSING');url=new URL(location,url);continue;}
   if(!response.ok){await response.body?.cancel();throw Object.assign(Error('SOURCE_HTTP_'+response.status),{status:response.status});}
   if(!/text\/html|application\/xhtml/i.test(response.headers.get('content-type')||'')){await response.body?.cancel();throw Error('SOURCE_NOT_HTML');}
-  const reader=response.body.getReader(),chunks=[];let size=0;
-  try{for(;;){const {value,done}=await reader.read();if(done)break;size+=value.byteLength;if(size>4000000)throw Error('SOURCE_TOO_LARGE');chunks.push(value);}}finally{await reader.cancel().catch(()=>{});}
-  const buffer=new Uint8Array(size);let offset=0;for(const chunk of chunks){buffer.set(chunk,offset);offset+=chunk.length;}const html=new TextDecoder().decode(buffer);
-  if(/verify (?:that )?you are human|access denied|just a moment\.\.\.|attention required|<title>[^<]*(?:captcha|verification)|potwierd[zź],? [zż]e jeste[sś] cz[lł]owiekiem/i.test(html)||html.length<100000&&/captcha|datadome.*challenge/i.test(html))throw Object.assign(Error('SOURCE_CAPTCHA'),{blocked:true});
+  const html=await readBody(response);
+  if(sourceChallenge(html))throw Object.assign(Error('SOURCE_CAPTCHA'),{blocked:true});
   return html;
  }throw Error('SOURCE_REDIRECT_LIMIT');
 }
