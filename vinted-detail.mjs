@@ -4,7 +4,7 @@ import {extractOfferISBN} from './isbn.mjs';
 // Read only the requested item, never recommendation cards or the full page.
 // Never read ISBN from recommendations: require exact item ID or an exact item URL.
 export function parseVintedDetail(html,url){
- const id=new URL(url).pathname.match(/^\\/items\\/(\\d+)(?:-|\\/|$)/)?.[1];
+ const id=new URL(url).pathname.match(/^\/items\/(\d+)(?:-|\/|$)/)?.[1];
  if(!id)throw Error('INVALID_VINTED_ITEM');
  const data=rscText(html),candidates=[];
  let identityMatched=false;
@@ -17,10 +17,10 @@ export function parseVintedDetail(html,url){
   // ISBN-specific metadata; do not scan the remainder of the page.
   candidates.push(node);
  };
- for(const m of data.matchAll(/"(?:item|itemDetails|itemDto|itemDTO|itemData|product|productItem|item_info)"\\s*:\\s*\\{/g)){
+ for(const m of data.matchAll(/"(?:item|itemDetails|itemDto|itemDTO|itemData|product|productItem|item_info)"\s*:\s*\{/g)){
   collect(objectAt(data,m.index+m[0].length-1));
  }
- for(const m of html.matchAll(/<script\\b[^>]*type=["']application\\/ld\\+json["'][^>]*>([\\s\\S]*?)<\\/script>/gi)){
+ for(const m of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)){
   let root;try{root=JSON.parse(m[1]);}catch{continue;}
   const graph=Array.isArray(root)?root:[root];
   for(const entry of graph){
@@ -31,7 +31,7 @@ export function parseVintedDetail(html,url){
     const links=[p.url,p.offers?.url].filter(v=>typeof v==='string');
     const exact=links.some(link=>{try{
      const u=new URL(link,url);
-     return ['www.vinted.pl','vinted.pl'].includes(u.hostname)&&u.pathname.match(/^\\/items\\/(\\d+)(?:-|\\/|$)/)?.[1]===id;
+     return ['www.vinted.pl','vinted.pl'].includes(u.hostname)&&u.pathname.match(/^\/items\/(\d+)(?:-|\/|$)/)?.[1]===id;
     }catch{return false;}});
     if(exact){identityMatched=true;candidates.push(p);}
    }
