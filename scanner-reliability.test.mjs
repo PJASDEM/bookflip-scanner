@@ -56,3 +56,39 @@ test('Vinted enrich continues after unrecognized detail schema',async()=>{
  assert.match(result[0].description,/nie rozpoznano struktury/);
  assert.equal(result[0].isbn,undefined);
 });
+
+test('Fulgrim the Perfect Son (7103170521): ISBN from matching Vinted book attributes', () => {
+ const url='https://www.vinted.pl/items/7103170521-warhammer-fulgrim-the-perfect-son-jude-reid';
+ // Synthetic page fixture based on fields visible in the user-provided Vinted screenshot,
+ // NOT a capture of the actual Vinted HTML.
+ const payload=JSON.stringify([1,JSON.stringify({
+  item:{id:7103170521,title:'Fulgrim - The Perfect Son',attributes:[
+   {name:'ISBN',value:'9781804079720'},{name:'Autor',value:'Jude Reid'},
+   {name:'Język',value:'Angielski'}
+  ]},
+  related:{item:{id:9999999,isbn:'9788367551809'}}
+ })]);
+ const result=parseVintedDetail('<script>self.__next_f.push('+payload+')</script>',url);
+ assert.equal(result.recognized,true);
+ assert.equal(result.isbnStatus,'found');
+ assert.equal(result.isbn,'9781804079720');
+});
+test('Fulgrim: an ISBN on an unrelated listing cannot be inherited', () => {
+ const url='https://www.vinted.pl/items/7103170521-warhammer-fulgrim-the-perfect-son-jude-reid';
+ const html='<script type="application/ld+json">'+JSON.stringify({
+  '@type':'Book',url:'https://www.vinted.pl/items/9999999-other',
+  isbn:'9781804079720'
+ })+'</script>';
+ const result=parseVintedDetail(html,url);
+ assert.equal(result.isbn,null);
+ assert.equal(result.isbnStatus,'schema_unrecognized');
+});
+test('Fulgrim: ISBN survives Vinted enrichment as a standalone offer field',async()=>{
+ const offer={url:'https://www.vinted.pl/items/7103170521-warhammer-fulgrim-the-perfect-son-jude-reid',title:'Fulgrim - The Perfect Son'};
+ const enriched=await enrichVintedBatch([offer],{reader:async()=>({
+  recognized:true,isbn:'9781804079720',
+  isbnDetection:{status:'valid',observations:[{value:'9781804079720',source:'attributes.ISBN',valid:true}]}
+ })});
+ assert.equal(enriched[0].isbn,'9781804079720');
+ assert.match(enriched[0].isbnEvidence,/Vinted/);
+});
