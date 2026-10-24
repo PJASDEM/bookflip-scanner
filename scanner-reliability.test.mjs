@@ -92,3 +92,23 @@ test('Fulgrim: ISBN survives Vinted enrichment as a standalone offer field',asyn
  assert.equal(enriched[0].isbn,'9781804079720');
  assert.match(enriched[0].isbnEvidence,/Vinted/);
 });
+
+
+test('Fulgrim: reads the exact ISBN attribute from live-shape Vinted HTML',()=>{
+ const url='https://www.vinted.pl/items/7103170521-warhammer-fulgrim-the-perfect-son-jude-reid';
+ const html='<link rel="canonical" href="'+url+'"><div data-testid="item-attributes-isbn_nav"><a data-testid="item-attributes-isbn_nav-link">9781804079720</a></div><div data-testid="recommendation"><a data-testid="item-attributes-isbn_nav-link">9788367551809</a></div>';
+ const result=parseVintedDetail(html,url);
+ assert.equal(result.recognized,true);assert.equal(result.isbn,'9781804079720');assert.equal(result.isbnStatus,'found');
+});
+test('A z popiołów: reads the exact ISBN attribute from Vinted HTML',()=>{
+ const url='https://www.vinted.pl/items/10506576818-a-z-popiolow-zrodzi-sie-ogien-sabaa-tahir';
+ const html='<link rel="canonical" href="'+url+'"><div data-testid="item-attributes-isbn_nav"><a data-testid="item-attributes-isbn_nav-link">9788367551809</a></div>';
+ const result=parseVintedDetail(html,url);
+ assert.equal(result.recognized,true);assert.equal(result.isbn,'9788367551809');assert.equal(result.isbnStatus,'found');
+});
+test('Vinted HTML ISBN row is ignored when canonical URL identifies another offer',()=>{
+ const url='https://www.vinted.pl/items/7103170521-warhammer-fulgrim-the-perfect-son-jude-reid';
+ const html='<link rel="canonical" href="https://www.vinted.pl/items/10506576818-a-z-popiolow"><a data-testid="item-attributes-isbn_nav-link">9788367551809</a>';
+ const result=parseVintedDetail(html,url);
+ assert.equal(result.recognized,false);assert.equal(result.isbn,null);
+});
