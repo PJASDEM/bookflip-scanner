@@ -8,7 +8,13 @@ function canonicalItemMatches(html,url,id){
  try{const u=new URL(unescapeHTML(canonical),url);return ['www.vinted.pl','vinted.pl'].includes(u.hostname)&&u.pathname.match(/^\/items\/(\d+)(?:-|\/|$)/)?.[1]===id;}catch{return false;}
 }
 function htmlAttributeISBN(html){
- const match=html.match(/<a\b(?=[^>]*\bdata-testid=["']item-attributes-isbn_nav-link["'])[^>]*>([\s\S]*?)<\/a>/i);
+ const opening=/<div\b(?=[^>]*\bdata-testid=["']item-attributes-isbn_nav["'])[^>]*>/i.exec(html);
+ if(!opening)return null;
+ const start=opening.index+opening[0].length,limit=Math.min(html.length,start+5000),tags=/<\/?div\b[^>]*>/gi;tags.lastIndex=start;
+ let depth=1,close=null,tag;
+ while((tag=tags.exec(html))&&tag.index<limit){if(/^<\//.test(tag[0]))depth--;else depth++;if(depth===0){close=tag.index;break;}}
+ if(close==null)return null;
+ const row=html.slice(start,close),match=row.match(/<a\b(?=[^>]*\bdata-testid=["']item-attributes-isbn_nav-link["'])[^>]*>([\s\S]*?)<\/a>/i);
  if(!match)return null;
  const value=unescapeHTML(match[1].replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim());
  return value?{parameters:[{name:'ISBN',value}]}:null;
