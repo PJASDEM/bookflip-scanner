@@ -96,13 +96,13 @@ test('Fulgrim: ISBN survives Vinted enrichment as a standalone offer field',asyn
 
 test('Fulgrim: reads the exact ISBN attribute from live-shape Vinted HTML',()=>{
  const url='https://www.vinted.pl/items/7103170521-warhammer-fulgrim-the-perfect-son-jude-reid';
- const html='<link rel="canonical" href="'+url+'"><div data-testid="item-attributes-isbn_nav"><a data-testid="item-attributes-isbn_nav-link">9781804079720</a></div><div data-testid="recommendation"><a data-testid="item-attributes-isbn_nav-link">9788367551809</a></div>';
+ const html='<link rel="canonical" href="'+url+'"><div data-testid="item-attributes-isbn_nav"><div><span>ISBN</span></div><div><a data-testid="item-attributes-isbn_nav-link">9781804079720</a></div></div><div data-testid="recommendation"><div data-testid="item-attributes-isbn_nav"><div><span>ISBN</span></div><div><a data-testid="item-attributes-isbn_nav-link">9788367551809</a></div></div></div>';
  const result=parseVintedDetail(html,url);
  assert.equal(result.recognized,true);assert.equal(result.isbn,'9781804079720');assert.equal(result.isbnStatus,'found');
 });
 test('A z popiołów: reads the exact ISBN attribute from Vinted HTML',()=>{
  const url='https://www.vinted.pl/items/10506576818-a-z-popiolow-zrodzi-sie-ogien-sabaa-tahir';
- const html='<link rel="canonical" href="'+url+'"><div data-testid="item-attributes-isbn_nav"><a data-testid="item-attributes-isbn_nav-link">9788367551809</a></div>';
+ const html='<link rel="canonical" href="'+url+'"><div data-testid="item-attributes-isbn_nav"><div><span>ISBN</span></div><div><a data-testid="item-attributes-isbn_nav-link">9788367551809</a></div></div>';
  const result=parseVintedDetail(html,url);
  assert.equal(result.recognized,true);assert.equal(result.isbn,'9788367551809');assert.equal(result.isbnStatus,'found');
 });
