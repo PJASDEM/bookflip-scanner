@@ -2,6 +2,7 @@ name: BookFlip Scanner
 on:
   schedule:
     - cron: '17 * * * *'
+    - cron: '47 * * * *'
   workflow_dispatch:
     inputs:
       continuation:
@@ -16,7 +17,7 @@ permissions:
   id-token: write
 jobs:
   scan:
-    if: github.repository == 'PJASDEM/bookflip-scanner' && github.ref == 'refs/heads/main' && (github.event_name != 'schedule' || github.event.schedule == '17 * * * *')
+    if: github.repository == 'PJASDEM/bookflip-scanner' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -30,5 +31,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BOOKFLIP_CONTINUATION: ${{ inputs.continuation || '0' }}
+          BOOKFLIP_RECOVERY: ${{ github.event_name == 'schedule' && github.event.schedule == '47 * * * *' }}
           BOOKFLIP_SITES_ACCESS: ${{ secrets.BOOKFLIP_SITES_ACCESS }}
         run: node run.mjs
