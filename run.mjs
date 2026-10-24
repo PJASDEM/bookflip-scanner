@@ -39,7 +39,6 @@ async function main(){if(!serviceToken)throw Error('BOOKFLIP_SITES_ACCESS_MISSIN
  // Do not replay an uncertain completed write as a failure: status/lease resolves it on the next run.
  await api({action:'complete',taskId:task.id,leaseToken:task.leaseToken,coverage:coverage||(task.adapter==='sprzedajemy_atom'?'Publiczny kanał RSS/Atom Sprzedajemy.pl: jedna strona kanału, tylko kategoria Książki i Podręczniki, maksymalnie 20 pasujących ofert. Cena pochodzi z RSS; dostępność i cena na stronie wymagają sprawdzenia. Brak pełnego pokrycia portalu.':'Autoryzowany feed JSON odczytany przez GitHub Actions. Zakres ograniczony do treści feedu i maksymalnie 20 pasujących ofert; brak pełnego pokrycia portalu.'),offers});completed++;
  }
- if(Date.now()<stopAt-20000){try{await api({action:'enrich'});}catch{console.warn(JSON.stringify({bibliography:'deferred'}));}}
  const after=await api({action:'status'});console.log(JSON.stringify({completed,blocked,failed,processed,savedBatches,remaining:after.active,processing:after.processing}));
  const generation=Number(process.env.BOOKFLIP_CONTINUATION||0);if(after.automatic!==false&&((completed+processed+savedBatches)>0||waitingForRetry)&&after.active>0&&Number.isInteger(generation)&&generation>=0&&generation<20&&(!waitingForRetry||(after.tasks||[]).some(t=>t.status==='retry_wait'&&t.nextAttemptAt<=Date.now()+15*60000))){await dispatchContinuation(generation+1,process.env.GITHUB_TOKEN);}
 }
