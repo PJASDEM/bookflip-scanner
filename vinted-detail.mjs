@@ -7,15 +7,15 @@ export function parseVintedDetail(html,url){
  const data=rscText(html),candidates=[];
  for(const m of data.matchAll(/"(?:item|itemDetails|itemDto|itemDTO|itemData|product)"\s*:\s*\{/g)){
   const item=objectAt(data,m.index+m[0].length-1);if(String(item?.id??item?.itemId)!==id)continue;
-  const {isbn,isbn_10,isbn_13,description,attributes,parameters}=item;
-  candidates.push({isbn,isbn_10,isbn_13,description,attributes,parameters});
+  const {isbn,isbn_10,isbn_13,description,attributes,parameters,gtin13,ean,bookDetails,book_details,catalogItem,productDetails}=item;
+  candidates.push({isbn,isbn_10,isbn_13,description,attributes,parameters,gtin13,ean,bookDetails,book_details,catalogItem,productDetails});
  }
  // Product JSON-LD must explicitly identify this item's URL.
  for(const m of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi))try{
   const root=JSON.parse(m[1]);for(const p of [root,...(root['@graph']||[])]){
-   if(!['Product','Book'].includes(p['@type']))continue;
+   const types=Array.isArray(p['@type'])?p['@type']:[p['@type']];if(!types.some(t=>['Product','Book'].includes(t)))continue;
    const link=p.url||p.offers?.url;if(!link||new URL(link,url).pathname.match(/^\/items\/(\d+)/)?.[1]!==id)continue;
-   candidates.push({isbn:p.isbn,isbn_13:p.gtin13,description:p.description,parameters:p.additionalProperty});
+   candidates.push({isbn:p.isbn,isbn_13:p.gtin13,ean:p.gtin,description:p.description,parameters:p.additionalProperty});
   }
  }catch{}
  const evidence=extractOfferISBN({parameters:candidates});
