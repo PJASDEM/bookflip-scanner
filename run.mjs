@@ -16,7 +16,7 @@ async function main(){if(!serviceToken)throw Error('BOOKFLIP_SITES_ACCESS_MISSIN
  for(let attempt=0;;attempt++){
   try{const r=await fetch(ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json','OAI-Sites-Authorization':'Bearer '+serviceToken,Authorization:'Bearer '+token},redirect:'error',body:JSON.stringify(body),signal:AbortSignal.timeout(45000)});
    const data=await r.json().catch(()=>{throw Object.assign(Error('INVALID_API_RESPONSE'),{transient:true});});
-   if(!r.ok||data.error){console.error(JSON.stringify({httpStatus:r.status,code:data.error,traceId:data.traceId,action:body.action}));throw Object.assign(Error(['SCAN_TASK_CANCELLED','SCAN_LEASE_LOST'].includes(data.error)?data.error:'SITE_HTTP_'+r.status),{transient:r.status>=500});}
+   if(!r.ok||data.error){console.error(JSON.stringify({httpStatus:r.status,code:data.error,traceId:data.traceId,action:body.action}));throw Object.assign(Error(['SCAN_TASK_CANCELLED','SCAN_LEASE_LOST'].includes(data.error)?data.error:'SITE_HTTP_'+r.status),{transient:r.status===429||r.status>=500});}
    if(body.action==='complete')savedBatches++;return data;
   }catch(e){if(!retryable||e.transient===false||attempt>=2){const code=e.name==='TimeoutError'||e.name==='AbortError'?'SITE_REQUEST_TIMEOUT':/^[A-Z0-9_]+$/.test(e.message)?e.message:'SITE_CONNECTION_FAILED';console.error(JSON.stringify({error:code,action:body.action,attempt:attempt+1}));throw Error(code);}
    console.log(JSON.stringify({retry:body.action,attempt:attempt+1}));await new Promise(r=>setTimeout(r,2000*(attempt+1)));
