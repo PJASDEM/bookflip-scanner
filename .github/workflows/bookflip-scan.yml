@@ -10,7 +10,7 @@ on:
         default: '0'
   push:
     branches: [main]
-    paths: ['run.mjs', 'continuation.mjs', 'feed.mjs', 'marketplaces.mjs', 'reference-parsers.mjs', 'rss.mjs', '.github/workflows/bookflip-scan.yml']
+    paths: ['run.mjs', 'continuation.mjs', 'feed.mjs', 'marketplaces.mjs', 'reference-parsers.mjs', 'rss.mjs', 'vinted-detail.mjs', 'isbn.mjs', '.github/workflows/bookflip-scan.yml']
 permissions:
   contents: read
   actions: write
