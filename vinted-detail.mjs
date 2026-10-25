@@ -76,6 +76,7 @@ export async function enrichVintedBatch(offers,options={}){
  for(const offer of offers){
   const known=extractOfferISBN(offer);if(known.status==='valid'){out.push(offer);continue;}
   let detail;try{detail=await read(offer.url,options);}catch(e){
+   if(e.blocked||[403,429].includes(e.status))throw e;
    if(e.status===404||e.status===410){out.push({...offer,description:[offer.description,'ISBN: strona oferty niedostępna (HTTP '+e.status+').'].filter(Boolean).join('\n')});continue;}
    if(options.bestEffort===true && !e.blocked){out.push({...offer,description:[offer.description,'ISBN: odczyt szczegółów chwilowo niedostępny; wymagane ponowne sprawdzenie.'].filter(Boolean).join('\n')});continue;}
    throw e;
@@ -92,3 +93,4 @@ export async function enrichVintedBatch(offers,options={}){
  }
  return out;
 }
+

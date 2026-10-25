@@ -1,10 +1,10 @@
 # BookFlip Scanner
 
-Prywatny wykonawca kolejki BookFlip. Strona steruje kolejką i trwale zapisuje wyniki. GitHub Actions pobiera zadania co godzinę (około 17. minuty; GitHub może opóźnić harmonogram). Uruchomienie ręczne jest dostępne w Actions → BookFlip Scanner → Run workflow. Nie jest potrzebna rozmowa z ChatGPT.
+Prywatny wykonawca kolejki BookFlip. Strona steruje kolejką i trwale zapisuje wyniki. GitHub Actions rozpoczyna skan około 17. minuty każdej godziny, wykonuje recovery około 47. minuty i wznawia istniejącą kolejkę co 5 minut. Osobny worker dopasowywania działa co 5 minut; GitHub może opóźnić harmonogram. Uruchomienie ręczne jest dostępne w Actions → BookFlip Scanner → Run workflow. Nie jest potrzebna rozmowa z ChatGPT.
 
 ## Dostęp
 
-Workflow ma tylko contents:read i id-token:write, bez zapisów do repozytorium. BookFlip sprawdza podpis OIDC, dokładne ID repozytorium i właściciela, main, ścieżkę workflow, rodzaj zdarzenia, czas ważności oraz audience. Pull requesty, forki i inne workflow nie mają dostępu. Prywatna brama Sites wymaga dodatkowo sekretu repozytorium BOOKFLIP_SITES_ACCESS z tokenem dostępu serwisowego tej konkretnej strony. Nie zapisuj go w plikach ani zmiennych workflow. Repozytorium nie zawiera kolekcji, historii użytkownika ani kluczy.
+Workflow ma contents:read, id-token:write oraz actions:write do zlecania kontynuacji, bez zapisów do kodu repozytorium. BookFlip sprawdza podpis OIDC, dokładne ID repozytorium i właściciela, main, ścieżkę workflow, rodzaj zdarzenia, czas ważności oraz audience. Pull requesty, forki i inne workflow nie mają dostępu. Prywatna brama Sites wymaga dodatkowo sekretu repozytorium BOOKFLIP_SITES_ACCESS z tokenem dostępu serwisowego tej konkretnej strony. Nie zapisuj go w plikach ani zmiennych workflow. Repozytorium nie zawiera kolekcji, historii użytkownika ani kluczy.
 
 ## Źródła
 
@@ -28,14 +28,14 @@ Opcjonalny autoryzowany feed JSON zastępuje czytnik HTML danego portalu. DNS i 
 
 ## Koszty i limity
 
-Pojedynczy przebieg ma limit 2 minut, pętla trwa do 75 sekund. Harmonogram godzinny to do ok. 1488 minut miesięcznie przy pełnym wykorzystaniu limitu w 31-dniowym miesiącu, plus ręczne uruchomienia. Nie skonfigurowano płatnych runnerów. Prywatne Actions korzystają z limitów konta GitHub, które trzeba kontrolować; ta konfiguracja nie włącza opłat ponad limit.
+Pętla skanera i workera ma budżet 4 minut. Limity jobów wynoszą odpowiednio 10 i 6 minut. Dwa joby co 5 minut oraz kontynuacje zwiększają zużycie Actions; sprawdzaj rzeczywiste użycie i limity konta.
 
 Etapy zakończone są zapisywane atomowo. Po błędach przejściowych obowiązuje backoff i maksymalnie 3 próby. Odmowa dostępu zatrzymuje etap. Błąd nie usuwa istniejących ofert. W logach są wyłącznie statusy i liczniki.
 
 ## Separate matching worker
 
-`workflow.yml` is the source for `.github/workflows/bookflip-scan.yml` in
-`PJASDEM/bookflip-scanner`. The hourly scan and the matching worker use separate
+`.github/workflows/bookflip-scan.yml` defines both jobs in
+`PJASDEM/bookflip-scanner`. The scan and the matching worker use separate
 job concurrency groups. The matching job also runs every five minutes, consumes
 only `status` and `process`, and drains successive batches of up to ten offers for up to
 four minutes. It never waits for marketplace HTTP or scans new pages. Empty,
@@ -45,3 +45,6 @@ The schedule can be delayed by GitHub. Both jobs retain the existing OIDC trust
 boundary and Sites access secret. `process.mjs` needs no GitHub write token.
 
 JSON przekazuje wyłącznie walidowane pola bibliograficzne, w tym ISBN10/13, listę ISBN, autorów, opis, OCR i niepewność odczytu. Nie przekazuje pól decyzji ani kolejki. Nowe zadania przetwarzają cały odczytany dokument (maks. 1000 wpisów) partiami po 3, bez automatycznego podążania za zewnętrznymi URL feedów. Kwoty pozostają PLN; jawne inne waluty są pomijane. Fingerprint strony obejmuje kolejność ofert.
+
+
+Audyt po PR #5, wyniki regresji i ograniczenia weryfikacji backendu: [AUDIT-2026-10-25.md](AUDIT-2026-10-25.md).
