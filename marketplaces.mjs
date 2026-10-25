@@ -26,7 +26,7 @@ export async function readSourceHtml(raw,{fetcher=fetch,source,pause=wait,now=Da
   const response=await fetcher(url,{headers:{Accept:'text/html','User-Agent':'BookFlip/1.0 (book price comparison)'},redirect:'manual',signal});
   if([403,429].includes(response.status)){
    const retryAfter=retryAfterSeconds(response.headers.get('retry-after'),now());
-   if(response.status===403){const html=await readBody(response,100000);if(sourceChallenge(html))throw Object.assign(Error('SOURCE_CAPTCHA'),{blocked:true,status:403});}
+   if(response.status===403){let html;try{html=await readBody(response,100000);}catch{throw Object.assign(Error('SOURCE_FORBIDDEN_UNREADABLE'),{blocked:true,status:403,retryAfter});}if(sourceChallenge(html))throw Object.assign(Error('SOURCE_CAPTCHA'),{blocked:true,status:403,retryAfter});}
    else await response.body?.cancel();
    throw Object.assign(Error('SOURCE_HTTP_'+response.status),{status:response.status,blocked:false,retryable:true,retryAfter});
   }
@@ -80,3 +80,4 @@ export async function scanMarketplace(task,options={}){
  const pagination=paginated?{...marketplacePageInfo(html,task,offers),total:offers.length}:undefined;
  return{offers,pagination,coverage:paginated?`${task.source}: strona ${task.page}, ${offers.length} pasujących wpisów. Cała odczytana strona zapisywana partiami. ${pagination.state==='end'?'Źródło wskazało koniec wyników.':pagination.state==='more'?'Potwierdzono kolejną stronę.':'Nie rozpoznano kolejnej strony; zakres niepełny.'} Dostępność, wydanie i koszty wymagają sprawdzenia. Zmiany kolejności mogą powodować pominięcia.`:'Jedna strona wyszukiwania, maksymalnie 20 kandydatów. Dostępność, cena szczegółowa, wydanie i koszty wymagają sprawdzenia. Zakres niepełny.'};
 }
+
