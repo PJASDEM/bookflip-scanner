@@ -3,6 +3,7 @@ on:
   schedule:
     - cron: '17 * * * *'
     - cron: '47 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
     inputs:
       continuation:
@@ -17,7 +18,7 @@ permissions:
   id-token: write
 jobs:
   scan:
-    if: github.repository == 'PJASDEM/bookflip-scanner' && github.ref == 'refs/heads/main'
+    if: github.repository == 'PJASDEM/bookflip-scanner' && github.ref == 'refs/heads/main' && (github.event_name != 'schedule' || github.event.schedule != '*/5 * * * *')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -34,3 +35,19 @@ jobs:
           BOOKFLIP_RECOVERY: ${{ github.event_name == 'schedule' && github.event.schedule == '47 * * * *' }}
           BOOKFLIP_SITES_ACCESS: ${{ secrets.BOOKFLIP_SITES_ACCESS }}
         run: node run.mjs
+
+  matching:
+    if: github.repository == 'PJASDEM/bookflip-scanner' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' && github.event.schedule == '*/5 * * * *')
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    concurrency:
+      group: bookflip-matching
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Drain matching queue
+        env:
+          BOOKFLIP_SITES_ACCESS: ${{ secrets.BOOKFLIP_SITES_ACCESS }}
+        run: node process.mjs

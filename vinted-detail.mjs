@@ -77,12 +77,13 @@ export async function enrichVintedBatch(offers,options={}){
   const known=extractOfferISBN(offer);if(known.status==='valid'){out.push(offer);continue;}
   let detail;try{detail=await read(offer.url,options);}catch(e){
    if(e.status===404||e.status===410){out.push({...offer,description:[offer.description,'ISBN: strona oferty niedostępna (HTTP '+e.status+').'].filter(Boolean).join('\n')});continue;}
+   if(options.bestEffort===true && !e.blocked){out.push({...offer,description:[offer.description,'ISBN: odczyt szczegółów chwilowo niedostępny; wymagane ponowne sprawdzenie.'].filter(Boolean).join('\n')});continue;}
    throw e;
   }
   // A changed schema is distinct from a missing ISBN. Do not block the
   // whole scan or claim that Vinted supplied no ISBN.
   if(detail.recognized===false){
-   out.push({...offer,description:[offer.description,'ISBN: nie rozpoznano struktury danych konkretnej oferty Vinted.'].filter(Boolean).join('\\n')});
+   out.push({...offer,description:[offer.description,'ISBN: nie rozpoznano struktury danych konkretnej oferty Vinted.'].filter(Boolean).join('\n')});
    continue;
   }
   const raw=detail.isbnDetection?.observations||[];
