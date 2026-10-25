@@ -37,7 +37,7 @@ jobs:
         run: node run.mjs
 
   matching:
-    if: github.repository == 'PJASDEM/bookflip-scanner' && github.ref == 'refs/heads/main' && (github.event_name != 'schedule' || github.event.schedule == '*/5 * * * *')
+    if: github.repository == 'PJASDEM/bookflip-scanner' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' && github.event.schedule == '*/5 * * * *')
     runs-on: ubuntu-latest
     timeout-minutes: 6
     concurrency:
