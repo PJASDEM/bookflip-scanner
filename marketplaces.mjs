@@ -34,7 +34,7 @@ export async function readSourceHtml(raw,{fetcher=fetch,source,pause=wait,now=Da
   if(!response.ok){await response.body?.cancel();throw Object.assign(Error('SOURCE_HTTP_'+response.status),{status:response.status});}
   if(!/text\/html|application\/xhtml/i.test(response.headers.get('content-type')||'')){await response.body?.cancel();throw Error('SOURCE_NOT_HTML');}
   const html=await readBody(response);
-  if(sourceChallenge(html))throw Object.assign(Error('SOURCE_CAPTCHA'),{blocked:true,retryAfter});
+  if(sourceChallenge(html))throw Object.assign(Error('SOURCE_CAPTCHA'),{blocked:true});
   return html;
  }throw Error('SOURCE_REDIRECT_LIMIT');
 }
