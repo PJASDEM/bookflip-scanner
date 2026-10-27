@@ -1,3 +1,4 @@
+import {preparePage,pageBatch} from './page-cursor.mjs';
 import {createHash} from 'node:crypto';
 import {dispatchContinuation} from './continuation.mjs';
 import {enrichVintedBatch} from './vinted-detail.mjs';
@@ -32,10 +33,12 @@ async function main(){if(!serviceToken)throw Error('BOOKFLIP_SITES_ACCESS_MISSIN
  break;}waitingForRetry=false;if(task.adapter!=='marketplace_html'&&task.adapter!=='sprzedajemy_atom'&&(task.adapter!=='json_feed'||!task.feedUrl)){await api({action:'fail',taskId:task.id,leaseToken:task.leaseToken,kind:'blocked',message:'SOURCE_NOT_CONFIGURED: brak dopuszczonego feedu JSON. Skonfiguruj źródło na stronie BookFlip; nie uruchomiono scrapingu.'});blocked++;continue;}
  let offers,coverage,pagination;try{if(task.adapter==='marketplace_html'){const result=await scanMarketplace(task);offers=result.offers;coverage=result.coverage;pagination=result.pagination;}else if(task.adapter==='sprzedajemy_atom'){if(task.source!=='Sprzedajemy.pl'||task.host!=='sprzedajemy.pl')throw Error('UNTRUSTED_RSS_TASK');const feed=await fetchFeed(sprzedajemyFeedUrl(task),{format:'atom'});offers=parseSprzedajemyAtom(feed,task);}else{const feed=await fetchFeed(task.feedUrl);offers=selectOffers(feed,task,Date.now(),task.paginationVersion===1?1000:20);if(task.paginationVersion===1){pagination={page:1,total:offers.length,digest:createHash('sha256').update(JSON.stringify(offers.map(o=>o.url))).digest('hex'),state:'end',nextPage:null};coverage='Autoryzowany feed JSON: wszystkie pasujące wpisy z odczytanego dokumentu, zapisywane partiami. Nie obejmuje innych dokumentów ani całego portalu.';}}}catch(e){const temporary=temporarySourceError(e);await api({action:'fail',taskId:task.id,leaseToken:task.leaseToken,kind:temporary?'temporary':'blocked',message:String(e.message).slice(0,200),retryAfterSeconds:e.retryAfter||300});failed++;continue;}
  if(pagination){
-  let offset=task.pageOffset||0;
-  if(offset>0&&task.pageDigest!==pagination.digest){await api({action:'complete',taskId:task.id,leaseToken:task.leaseToken,coverage,offers:[],pagination:{...pagination,offset,reset:true}});offset=0;}
-  if(offset===0&&(task.pageDigests||[]).includes(pagination.digest)){await api({action:'complete',taskId:task.id,leaseToken:task.leaseToken,coverage,offers:[],pagination:{...pagination,offset:0}});completed++;continue;}
-  do{if(Date.now()>stopAt-35000){await api({action:'yield',taskId:task.id,leaseToken:task.leaseToken});break runLoop;}let batch=offerBatch(offers,offset);try{if(task.source==='Vinted'&&task.adapter==='marketplace_html')batch=await enrichVintedBatch(batch,{bestEffort:true});}catch(e){await api({action:'fail',taskId:task.id,leaseToken:task.leaseToken,kind:e.blocked?'blocked':temporarySourceError(e)?'temporary':'invalid',message:String(e.message).slice(0,200),retryAfterSeconds:e.retryAfter||300});failed++;continue runLoop;}await api({action:'complete',taskId:task.id,leaseToken:task.leaseToken,coverage:coverage+(task.source==='Vinted'&&task.adapter==='marketplace_html'?' ISBN sprawdzany w szczegółach przed zapisem; partie po 3 oferty.':' Partie po maksymalnie 3 oferty.'),offers:batch,pagination:{...pagination,offset}});offset+=batch.length;if(offset>=offers.length)break;if(Date.now()>stopAt-5000){await api({action:'yield',taskId:task.id,leaseToken:task.leaseToken});break runLoop;}}while(true);
+  const page=preparePage(task,offers,pagination);let offset=page.offset;
+  do{if(Date.now()>stopAt-35000){await api({action:'yield',taskId:task.id,leaseToken:task.leaseToken});break runLoop;}const next=pageBatch(page,offset);let batch=next.offers;
+   try{if(task.source==='Vinted'&&task.adapter==='marketplace_html'&&batch.length)batch=await enrichVintedBatch(batch,{bestEffort:true});}catch(e){await api({action:'fail',taskId:task.id,leaseToken:task.leaseToken,kind:e.blocked?'blocked':temporarySourceError(e)?'temporary':'invalid',message:String(e.message).slice(0,200),retryAfterSeconds:e.retryAfter||300});failed++;continue runLoop;}
+   await api({action:'complete',taskId:task.id,leaseToken:task.leaseToken,coverage:coverage+' Stabilna lista adresów strony; zapis partiami po 3 oferty.',offers:batch,pagination:next.pagination});
+   delete page.pagination.urls;offset=next.pagination.endOffset;if(page.repeated||offset>=page.urls.length)break;
+  }while(true);
   console.log(JSON.stringify({source:task.source,page:pagination.page,entries:offers.length,nextPage:pagination.nextPage,state:pagination.state}));completed++;continue;
  }
  // Do not replay an uncertain completed write as a failure: status/lease resolves it on the next run.
@@ -60,5 +63,3 @@ async function main(){if(!serviceToken)throw Error('BOOKFLIP_SITES_ACCESS_MISSIN
  }
 }
 main().catch(e=>{console.error(JSON.stringify({error:/^[A-Z0-9_]+$/.test(e.message)?e.message:'RUNNER_FAILED'}));process.exitCode=1;});
-
-
