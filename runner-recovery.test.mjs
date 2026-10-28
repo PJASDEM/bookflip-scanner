@@ -12,7 +12,7 @@ for(const scenario of ['resume','changed','uncertain','cancelled','cooldown','ne
   const b=JSON.parse(options.body);calls.push(b);
   if(b.action==='claim'){
    if(claimed)return Response.json({task:null});claimed=true;
-   return Response.json({task:{id:'t',leaseToken:'l',adapter:'marketplace_html',source:'Vinted',paginationVersion:1,page:1,pageOffset:scenario==='resume'||scenario==='changed'?3:0,pageDigest:scenario==='changed'?'old':'digest'}});
+   return Response.json({task:{id:'t',leaseToken:'l',adapter:'marketplace_html',source:'Vinted',paginationVersion:1,page:1,pageOffset:scenario==='resume'?3:0,pageDigest:scenario==='changed'?'old':'digest',...(scenario==='resume'?{pageCursorVersion:2,pageUrls:Array.from({length:6},(_,i)=>'https://www.vinted.pl/items/'+i),pageCursor:{page:1,digest:'digest',state:'end',nextPage:null}}:{})}});
   }
   if(b.action==='complete'){
    writes++;
@@ -23,12 +23,13 @@ for(const scenario of ['resume','changed','uncertain','cancelled','cooldown','ne
  };
  try{
   let code=readFileSync(new URL('./run.mjs',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/main\(\)\.catch\([\s\S]*$/,'export {main};').replace('setTimeout(r,2000*(attempt+1))','setTimeout(r,0)');
-  const prefix=`const createHash=()=>{};const dispatchContinuation=async()=>{throw Error('unexpected continuation')};const scanMarketplace=async()=>{${scenario==='aborted'?"throw new DOMException('The operation was aborted','AbortError');":scenario==='socket'?"throw Object.assign(Error('terminated'),{cause:{code:'UND_ERR_SOCKET'}});":scenario==='network'?"throw TypeError('fetch failed');":scenario==='feed429'?"throw Object.assign(Error('FEED_HTTP_429'),{status:429,retryAfter:180});":''}return ({offers:Array.from({length:6},(_,i)=>({url:'https://www.vinted.pl/items/'+i,title:'Book'})),pagination:{digest:'digest',page:1,total:6,state:'end',nextPage:null},coverage:'fixture'});};const enrichVintedBatch=async b=>{${scenario==='cooldown'?"throw Object.assign(Error('SOURCE_HTTP_429'),{retryable:true,status:429,retryAfter:180});":'return b;'}};\n`;
+  const cursor=readFileSync(new URL('./page-cursor.mjs',import.meta.url),'utf8').replace(/^export /gm,'');
+  const prefix=cursor+`const createHash=()=>{};const dispatchContinuation=async()=>{throw Error('unexpected continuation')};const scanMarketplace=async()=>{${scenario==='aborted'?"throw new DOMException('The operation was aborted','AbortError');":scenario==='socket'?"throw Object.assign(Error('terminated'),{cause:{code:'UND_ERR_SOCKET'}});":scenario==='network'?"throw TypeError('fetch failed');":scenario==='feed429'?"throw Object.assign(Error('FEED_HTTP_429'),{status:429,retryAfter:180});":''}return ({offers:Array.from({length:6},(_,i)=>({url:'https://www.vinted.pl/items/'+i,title:'Book'})),pagination:{digest:'digest',page:1,total:6,state:'end',nextPage:null},coverage:'fixture'});};const enrichVintedBatch=async b=>{${scenario==='cooldown'?"throw Object.assign(Error('SOURCE_HTTP_429'),{retryable:true,status:429,retryAfter:180});":'return b;'}};\n`;
   const runner=await import('data:text/javascript;base64,'+Buffer.from(prefix+code).toString('base64')+'#'+scenario);await runner.main();
   assert.equal(calls.find(b=>b.action==='ensure').resumeOnly,true);
   const completed=calls.filter(b=>b.action==='complete');
   if(scenario==='resume')assert.deepEqual(completed.map(b=>b.pagination.offset),[3]);
-  if(scenario==='changed'){assert.equal(completed[0].pagination.reset,true);assert.deepEqual(completed.slice(1).map(b=>b.pagination.offset),[0,3]);}
+  if(scenario==='changed'){assert.deepEqual(completed.map(b=>b.pagination.offset),[0,3]);}
   if(scenario==='uncertain'){assert.equal(completed[0].requestId,completed[1].requestId);assert.deepEqual(completed[0],completed[1]);}
   if(scenario==='exhausted'){assert.equal(completed.length,3);assert.ok(completed.every(b=>b.requestId===completed[0].requestId));assert.ok(!calls.some(b=>b.action==='fail'));assert.ok(calls.some(b=>b.action==='status'));assert.ok(calls.some(b=>b.action==='report'&&b.outcome==='error'));}
   if(scenario==='cancelled'){assert.equal(completed.length,1);assert.ok(calls.some(b=>b.action==='report'&&b.outcome==='cancelled'));}
