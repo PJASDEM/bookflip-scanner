@@ -8,6 +8,18 @@ export function matchesSearch(task,title){
  const match=terms.some(term=>{const tokens=normalizeSearch(term).split(' ').filter(Boolean);return tokens.length&&tokens.every(t=>(' '+text+' ').includes(' '+t+' '));});
  return match;
 }
+// One matching policy for HTML marketplaces, Atom and authorized JSON feeds.
+export function matchesTopic(task,title){
+ if(task.mode==='watchlist')return matchesSearch(task,title);
+ const category=normalizeSearch(task.category);
+ const categoryTerms=category.includes('warcraft')?['Warcraft','World of Warcraft']
+  :category.includes('warhammer')||category.includes('horus')||category.includes('herezja')?
+   ['Warhammer','Warhammer 40,000','WH40K','Warhammer 40K','Horus','Horus Heresy','Herezja Horusa']
+  :[];
+ const terms=[task.searchQuery,task.title,...(task.aliases||[]),...categoryTerms];
+ if(!terms.some(Boolean))terms.push(task.category||'Warhammer');
+ return matchesSearch({title:'',searchQuery:'',aliases:terms},title);
+}
 export function excludesProduct(title){
  const n=normalizeSearch(title);
  if(/\b(ebook|e book|epub|mobi|audiobook|audio book|stl|gra pc|gra ps5|gra ps4|gra komputerowa)\b/.test(n))return true;
