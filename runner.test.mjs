@@ -14,7 +14,8 @@ test('runner zapisuje cały feed JSON partiami i nie pobiera szczegółów Vinte
  };
  try{
   const code=readFileSync(new URL('./run.mjs',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/main\(\)\.catch\([\s\S]*$/,'export {main,offerBatch};');
-  const prefix=`const {createHash}=await import('node:crypto');const {selectOffers}=await import(${JSON.stringify(new URL('./feed.mjs',import.meta.url).href)});const fetchFeed=async()=>${JSON.stringify(rows)};const enrichVintedBatch=async()=>{throw Error('unexpected details');};const dispatchContinuation=async()=>{throw Error('unexpected continuation');};\n`;
+  const cursor=readFileSync(new URL('./page-cursor.mjs',import.meta.url),'utf8').replace(/^export /gm,'');
+  const prefix=cursor+`const {createHash}=await import('node:crypto');const {selectOffers}=await import(${JSON.stringify(new URL('./feed.mjs',import.meta.url).href)});const fetchFeed=async()=>${JSON.stringify(rows)};const enrichVintedBatch=async()=>{throw Error('unexpected details');};const dispatchContinuation=async()=>{throw Error('unexpected continuation');};\n`;
   const runner=await import('data:text/javascript;base64,'+Buffer.from(prefix+code).toString('base64'));await runner.main();
   const large={description:'x'.repeat(40000)};assert.equal(runner.offerBatch([large,large,large],0).length,1);assert.throws(()=>runner.offerBatch([{description:'x'.repeat(80000)}],0),/PAYLOAD_TOO_LARGE/);
   const batches=calls.filter(c=>c.action==='complete');assert.equal(batches.length,16);assert.equal(batches.reduce((n,b)=>n+b.offers.length,0),47);
