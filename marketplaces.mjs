@@ -20,6 +20,7 @@ export function sourceChallenge(html){
   || /\/cdn-cgi\/challenge-platform\/|(?:geo\.)?captcha-delivery\.com\/(?:captcha|interstitial)\//i.test(html)
   || html.length<100000&&/captcha|datadome.*challenge/i.test(markup);
 }
+function challengeDiagnostics(html,source,status){console.warn('BOOKFLIP_CHALLENGE_DIAGNOSTIC',JSON.stringify({source,status,bytes:html.length,title:(html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]||'').slice(0,160),productCards:(html.match(/tezeusz-product-card-image/g)||[]).length,cloudflare:html.includes('/cdn-cgi/challenge-platform/'),humanPrompt:/verify (?:that )?you are human|just a moment/i.test(html),captchaMarkup:html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ').match(/.{0,60}captcha.{0,60}/i)?.[0]?.replace(/[\r\n]/g,' ')}));return true;}
 async function readBody(response,limit=4000000){
  if(!response.body)return '';
  const reader=response.body.getReader(),chunks=[];let size=0;
@@ -34,7 +35,7 @@ export async function readSourceHtml(raw,{fetcher=fetch,source,pause=wait,now=Da
   const response=await fetcher(url,{headers:{Accept:'text/html','User-Agent':'BookFlip/1.0 (book price comparison)'},redirect:'manual',signal});
   if([403,429].includes(response.status)){
    const retryAfter=retryAfterSeconds(response.headers.get('retry-after'),now());
-   if(response.status===403){let html;try{html=await readBody(response,100000);}catch{throw Object.assign(Error('SOURCE_FORBIDDEN_UNREADABLE'),{blocked:true,status:403,retryAfter});}if(sourceChallenge(html))throw Object.assign(Error('SOURCE_CAPTCHA'),{blocked:true,status:403,retryAfter});}
+   if(response.status===403){let html;try{html=await readBody(response,100000);}catch{throw Object.assign(Error('SOURCE_FORBIDDEN_UNREADABLE'),{blocked:true,status:403,retryAfter});}if(sourceChallenge(html)&&challengeDiagnostics(html,source,response.status))throw Object.assign(Error('SOURCE_CAPTCHA'),{blocked:true,status:403,retryAfter});}
    else await response.body?.cancel();
    throw Object.assign(Error('SOURCE_HTTP_'+response.status),{status:response.status,blocked:false,retryable:true,retryAfter});
   }
@@ -42,7 +43,7 @@ export async function readSourceHtml(raw,{fetcher=fetch,source,pause=wait,now=Da
   if(!response.ok){await response.body?.cancel();throw Object.assign(Error('SOURCE_HTTP_'+response.status),{status:response.status});}
   if(!/text\/html|application\/xhtml/i.test(response.headers.get('content-type')||'')){await response.body?.cancel();throw Error('SOURCE_NOT_HTML');}
   const html=await readBody(response);
-  if(sourceChallenge(html))throw Object.assign(Error('SOURCE_CAPTCHA'),{blocked:true});
+  if(sourceChallenge(html)&&challengeDiagnostics(html,source,response.status))throw Object.assign(Error('SOURCE_CAPTCHA'),{blocked:true});
   return html;
  }throw Error('SOURCE_REDIRECT_LIMIT');
 }
