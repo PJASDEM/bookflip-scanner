@@ -12,7 +12,14 @@ export function retryAfterSeconds(header,now=Date.now()){
  return Number.isFinite(seconds)&&seconds>=0?Math.min(86400,Math.max(30,Math.ceil(seconds))):30;
 }
 const lastReads=new Map();
-const sourceChallenge=html=>/verify (?:that )?you are human|access denied|just a moment\.\.\.|attention required|<title>[^<]*(?:captcha|verification)|potwierd[zź],? [zż]e jeste[sś] cz[lł]owiekiem/i.test(html)||html.length<100000&&/captcha|datadome.*challenge/i.test(html);
+export function sourceChallenge(html){
+ // Embedded form integrations are not access challenges. Inspect visible markup,
+ // while retaining explicit challenge-provider endpoints even inside scripts.
+ const markup=html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ').replace(/<!--[\s\S]*?-->/g,' ');
+ return /verify (?:that )?you are human|access denied|just a moment\.\.\.|attention required|<title>[^<]*(?:captcha|verification)|potwierd[zź],? [zż]e jeste[sś] cz[lł]owiekiem/i.test(markup)
+  || /\/cdn-cgi\/challenge-platform\/|(?:geo\.)?captcha-delivery\.com\/(?:captcha|interstitial)\//i.test(html)
+  || html.length<100000&&/captcha|datadome.*challenge/i.test(markup);
+}
 async function readBody(response,limit=4000000){
  if(!response.body)return '';
  const reader=response.body.getReader(),chunks=[];let size=0;
@@ -45,7 +52,7 @@ export function parseMarketplace(html,task,observedAt=new Date().toISOString(),l
   let recognized=false;for(const m of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)){try{const d=JSON.parse(m[1]);if(Array.isArray(d.offers?.offers))recognized=true;}catch{}}
   if(!recognized)throw Error('UNRECOGNIZED_MARKETPLACE_DATA');rows=parseOlx(html,book,observedAt);
  }}catch(e){if(e.message==='UNRECOGNIZED_MARKETPLACE_DATA')throw e;throw Error('UNRECOGNIZED_MARKETPLACE_DATA');}
- const out=[],seen=new Set();for(const row of rows){if(row.available===false&&row.availabilityKnown!==false)continue;let u;try{u=new URL(row.url);}catch{continue;}if(u.protocol!=='https:'||![task.host,task.host.replace(/^www\./,'')].includes(u.hostname)||u.username||u.password||u.port||(sources[task.source].path&&!u.pathname.startsWith(sources[task.source].path))||(['Tezeusz.pl','Dedalus.pl'].includes(task.source)&&/^\/(?:szukaj|s|do-koszyka|do-schowka|koszyk|logowanie|info|tanie-ksiazki)(?:\/|$)/i.test(u.pathname)))continue;
+ const out=[],seen=new Set();for(const row of rows){if(row.available===false&&row.availabilityKnown!==false)continue;let u;try{u=new URL(row.url);}catch{continue;}if(u.protocol!=='https:'||![task.host,task.host.replace(/^www\./,'')].includes(u.hostname)||u.username||u.password||u.port||(sources[task.source].path&&!u.pathname.startsWith(sources[task.source].path))||(['Tezeusz.pl','Dedalus.pl'].includes(task.source)&&/^\/(?:szukaj|s|do-koszyka|do-schowka|koszyk|logowanie|info|tanie-ksiazki(?=\/?$))(?:\/|$)/i.test(u.pathname)))continue;
   if(task.source==='Vinted'&&!/^\/items\/\d+/.test(u.pathname))continue;
   u.search='';u.hash='';if(seen.has(u.href))continue;seen.add(u.href);const price=Math.round(row.price*100);if(!Number.isSafeInteger(price)||price<=0||price>100000000)continue;
   out.push({...bibliographicMetadata(row),title:row.title.slice(0,500),url:u.href,price,observedAt,activeConfirmed:false,priceConfirmed:false,availability:'unconfirmed',priceEvidence:'marketplace_listing'});if(out.length===limit)break;
@@ -55,12 +62,30 @@ function decodeHtml(s){return String(s||'').replace(/&nbsp;|&#160;/gi,' ').repla
 function textOnly(s){return decodeHtml(String(s||'').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ')).replace(/\s+/g,' ').trim();}
 function parseBookstore(html,book,source){
  const host=sources[source].host,rows=[],seen=new Set();
- const add=(title,rawUrl,price,currency='PLN')=>{let url;try{url=new URL(rawUrl,'https://'+host);}catch{return;}if(url.protocol!=='https:'||url.hostname!==host||url.port||url.username||url.password||/^\/(?:szukaj|s|do-koszyka|do-schowka|koszyk|logowanie|info|tanie-ksiazki)(?:\/|$)/i.test(url.pathname)||!title||!book.accept(title)||currency!=='PLN')return;const amount=Number(String(price).replace(/\s/g,'').replace(',','.'));if(!Number.isFinite(amount)||amount<=0||amount>100000)return;url.search='';url.hash='';if(seen.has(url.href))return;seen.add(url.href);rows.push({title,url:url.href,price:amount,available:true});};
+ const add=(title,rawUrl,price,currency='PLN')=>{let url;try{url=new URL(rawUrl,'https://'+host);}catch{return;}if(url.protocol!=='https:'||url.hostname!==host||url.port||url.username||url.password||/^\/(?:szukaj|s|do-koszyka|do-schowka|koszyk|logowanie|info|tanie-ksiazki(?=\/?$))(?:\/|$)/i.test(url.pathname)||!title||!book.accept(title)||currency!=='PLN')return;const amount=Number(String(price).replace(/\s/g,'').replace(',','.'));if(!Number.isFinite(amount)||amount<=0||amount>100000)return;url.search='';url.hash='';if(seen.has(url.href))return;seen.add(url.href);rows.push({title,url:url.href,price:amount,available:true});};
+ // Tezeusz cards contain variant counts and old prices; read only the
+ // current-price element within the same product anchor.
+ if(source==='Tezeusz.pl'&&/tezeusz-product-card/.test(html)){
+  for(const m of html.matchAll(/<a\b([^>]*\bclass=["'][^"']*\btezeusz-product-card\b[^"']*["'][^>]*)>([\s\S]*?)<\/a>/gi)){
+   const href=m[1].match(/\bhref=["']([^"']+)["']/i)?.[1],card=m[2];
+   const title=card.match(/<img\b[^>]*\balt=["']([^"']+)["']/i)?.[1];
+   const price=card.match(/<div\b[^>]*\bclass=["']tezeusz-product-card-price["'][^>]*>\s*([^<]+)/i)?.[1];
+   const amount=price&&textOnly(price).match(/^(\d+(?:[ \u00a0]\d{3})*(?:[,.]\d{2})?)\s*(?:zł|PLN)$/i);
+   if(href&&title&&amount)add(textOnly(title),decodeHtml(href),amount[1]);
+  }
+  return rows;
+ }
+ if(source==='Dedalus.pl'&&/Niestety, nie znaleźliśmy produktów, których szukasz\./i.test(textOnly(html)))return rows;
  const products=[];const visit=node=>{if(!node||typeof node!=='object')return;if(Array.isArray(node)){node.forEach(visit);return;}const type=Array.isArray(node['@type'])?node['@type']:[node['@type']];if(type.some(x=>['Product','Book'].includes(x)))products.push(node);for(const k of ['@graph','itemListElement','item'])visit(node[k]);};
- for(const m of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi))try{visit(JSON.parse(m[1]));}catch{}
+ for(const m of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi))try{
+  // Dedalus emits literal newlines inside JSON-LD descriptions. Escape only
+  // control characters inside strings; never evaluate page JavaScript.
+  const json=source==='Dedalus.pl'?m[1].replace(/"(?:[^"\\]|\\[\s\S])*"/g,value=>value.replace(/[\u0000-\u001f]/g,c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0'))):m[1];
+  visit(JSON.parse(json));
+ }catch{}
  for(const p of products){const offer=Array.isArray(p.offers)?p.offers[0]:p.offers;if(!offer||offer['@type']==='AggregateOffer')continue;const price=offer.price??offer.lowPrice,currency=offer.priceCurrency||'PLN';if(offer.lowPrice!=null&&offer.price==null)continue;add(p.name||p.title,offer.url||p.url||p['@id'],price,currency);}
  if(rows.length||products.length)return rows;
- const anchors=[...html.matchAll(/<a\b([^>]*\bhref=["']([^"']+)["'][^>]*)>([\s\S]*?)<\/a>/gi)].filter(m=>{try{const u=new URL(decodeHtml(m[2]),'https://'+host);return u.hostname===host&&/^https?:$/.test(u.protocol)&&!/^\/(?:szukaj|s|do-koszyka|do-schowka|koszyk|logowanie|info|tanie-ksiazki)(?:\/|$)/i.test(u.pathname);}catch{return false;}});
+ const anchors=[...html.matchAll(/<a\b([^>]*\bhref=["']([^"']+)["'][^>]*)>([\s\S]*?)<\/a>/gi)].filter(m=>{try{const u=new URL(decodeHtml(m[2]),'https://'+host);return u.hostname===host&&/^https?:$/.test(u.protocol)&&!/^\/(?:szukaj|s|do-koszyka|do-schowka|koszyk|logowanie|info|tanie-ksiazki(?=\/?$))(?:\/|$)/i.test(u.pathname);}catch{return false;}});
  if(!anchors.length)throw Error('UNRECOGNIZED_MARKETPLACE_DATA');
  const seenUrls=new Set();for(let i=0;i<anchors.length;i++){const a=anchors[i],url=decodeHtml(a[2]);if(seenUrls.has(url))continue;seenUrls.add(url);let next=i+1;while(next<anchors.length&&decodeHtml(anchors[next][2])===url)next++;const segment=html.slice(a.index,anchors[next]?.index??Math.min(html.length,a.index+5000)),attrs=a[1];let title=attrs.match(/\btitle=["']([^"']+)["']/i)?.[1]||attrs.match(/\baria-label=["']([^"']+)["']/i)?.[1]||a[3].match(/<img\b[^>]*\balt=["']([^"']+)/i)?.[1]||textOnly(a[3]);title=textOnly(title);if(!title)continue;let price=null,currency='PLN';const micro=segment.match(/itemprop=["']price["'][^>]*content=["']([^"']+)/i)||segment.match(/content=["']([^"']+)["'][^>]*itemprop=["']price["']/i);if(micro)price=micro[1];if(price==null){const match=textOnly(segment).match(/(?:^|\s)(\d{1,5}(?:[\s\u00a0]\d{3})*(?:[,.]\d{2})?)\s*(?:zł|PLN)(?:\s|$)/i);if(match)price=match[1];}if(price!=null)add(title,url,price,currency);}
  if(!rows.length&&/<(?:article|li|div)\b[^>]*(?:product|product-item|productbox|search-product)/i.test(html))return rows;
@@ -96,3 +121,4 @@ export async function scanMarketplace(task,options={}){
  const pagination=paginated?{...marketplacePageInfo(html,task,offers),total:offers.length}:undefined;
  return{offers,pagination,coverage:paginated?`${task.source}: strona ${task.page}, ${offers.length} pasujących wpisów. Cała odczytana strona zapisywana partiami. ${pagination.state==='end'?'Źródło wskazało koniec wyników.':pagination.state==='more'?'Potwierdzono kolejną stronę.':'Nie rozpoznano kolejnej strony; zakres niepełny.'} Dostępność, wydanie i koszty wymagają sprawdzenia. Zmiany kolejności mogą powodować pominięcia.`:'Jedna strona wyszukiwania, maksymalnie 20 kandydatów. Dostępność, cena szczegółowa, wydanie i koszty wymagają sprawdzenia. Zakres niepełny.'};
 }
+
