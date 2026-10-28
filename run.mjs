@@ -1,7 +1,6 @@
 import {preparePage,pageBatch} from './page-cursor.mjs';
 import {createHash} from 'node:crypto';
 import {dispatchContinuation} from './continuation.mjs';
-import {enrichVintedBatch} from './vinted-detail.mjs';
 import {fetchFeed,selectOffers} from './feed.mjs';
 import {sprzedajemyFeedUrl,parseSprzedajemyAtom} from './rss.mjs';
 import {scanMarketplace} from './marketplaces.mjs';
@@ -35,7 +34,6 @@ async function main(){if(!serviceToken)throw Error('BOOKFLIP_SITES_ACCESS_MISSIN
  if(pagination){
   const page=preparePage(task,offers,pagination);let offset=page.offset;
   do{if(Date.now()>stopAt-35000){await api({action:'yield',taskId:task.id,leaseToken:task.leaseToken});break runLoop;}const next=pageBatch(page,offset);let batch=next.offers;
-   try{if(task.source==='Vinted'&&task.adapter==='marketplace_html'&&batch.length)batch=await enrichVintedBatch(batch,{bestEffort:true});}catch(e){await api({action:'fail',taskId:task.id,leaseToken:task.leaseToken,kind:e.blocked?'blocked':temporarySourceError(e)?'temporary':'invalid',message:String(e.message).slice(0,200),retryAfterSeconds:e.retryAfter||300});failed++;continue runLoop;}
    await api({action:'complete',taskId:task.id,leaseToken:task.leaseToken,coverage:coverage+' Stabilna lista adresów strony; zapis partiami po 3 oferty.',offers:batch,pagination:next.pagination});
    delete page.pagination.urls;offset=next.pagination.endOffset;if(page.repeated||offset>=page.urls.length)break;
   }while(true);
