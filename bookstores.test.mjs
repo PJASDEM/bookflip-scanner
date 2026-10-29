@@ -21,3 +21,13 @@ test('Dedalus empty results do not import recommendations',()=>{
  const html='<p>Niestety, nie znaleźliśmy produktów, których szukasz.</p><script type="application/ld+json">{"@type":"Product","name":"Warhammer książka","url":"https://dedalus.pl/warhammer","offers":{"price":30}}</script>';
  assert.deepEqual(parseMarketplace(html,task('Dedalus.pl')),[]);
 });
+for(const [source,host,url] of [['Allegro','allegro.pl','https://allegro.pl/oferta/warhammer-book-123456789'],['Empik','www.empik.com','https://www.empik.com/warhammer-book,p123456789,ksiazka-p']]){
+ test(`${source}: exact product price only, safe URL and unconfirmed availability`,async()=>{
+ const task={source,host,mode:'watchlist',title:'Warhammer',page:1,paginationVersion:1};
+ const product=(url,offers)=>({'@type':'Product',name:'Warhammer książka',url,offers});
+ const html='<script type="application/ld+json">'+JSON.stringify({'@type':'ItemList',itemListElement:[product(url,{'@type':'Offer',price:'29.90',priceCurrency:'PLN'}),product(url+'-range',{'@type':'AggregateOffer',lowPrice:'1',priceCurrency:'PLN'}),product('https://evil.test/oferta/book-123',{'@type':'Offer',price:1,priceCurrency:'PLN'})]})+'</script>';
+ const result=await scanMarketplace(task,{pause:async()=>{},fetcher:async()=>new Response(html,{headers:{'content-type':'text/html'}})});
+ assert.equal(result.offers.length,1);assert.equal(result.offers[0].price,2990);assert.equal(new URL(result.offers[0].url).hostname,host);assert.equal(result.offers[0].availability,'unconfirmed');assert.equal(result.pagination.state,'unknown');
+ assert.throws(()=>parseMarketplace('<h1>Search</h1>',task),/UNRECOGNIZED/);
+ });
+}
