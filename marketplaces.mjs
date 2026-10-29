@@ -62,7 +62,7 @@ function decodeHtml(s){return String(s||'').replace(/&nbsp;|&#160;/gi,' ').repla
 function textOnly(s){return decodeHtml(String(s||'').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ')).replace(/\s+/g,' ').trim();}
 function parseBookstore(html,book,source){
  const host=sources[source].host,rows=[],seen=new Set();
- const add=(title,rawUrl,price,currency='PLN')=>{let url;try{url=new URL(rawUrl,'https://'+host);}catch{return;}if(source==='Allegro'&&!/^\/oferta\/[^/]+-\d+$/.test(url.pathname))return;if(source==='Empik'&&!/,p\d+,ksiazka-p$/.test(url.pathname))return;if(url.protocol!=='https:'||url.hostname!==host||url.port||url.username||url.password||/^\/(?:szukaj|s|do-koszyka|do-schowka|koszyk|logowanie|info|tanie-ksiazki(?=\/?$))(?:\/|$)/i.test(url.pathname)||!title||!book.accept(title)||currency!=='PLN')return;const amount=Number(String(price).replace(/\s/g,'').replace(',','.'));if(!Number.isFinite(amount)||amount<=0||amount>100000)return;url.search='';url.hash='';if(seen.has(url.href))return;seen.add(url.href);rows.push({title,url:url.href,price:amount,available:true});};
+ const add=(title,rawUrl,price,currency='PLN')=>{let url;try{url=new URL(rawUrl,'https://'+host);}catch{return;}if(source==='Allegro'&&!/^\/oferta\/[^/]+-\d+\/?$/.test(url.pathname))return;if(source==='Empik'&&!/,p\d+(?:,ksiazka-p)?\/?$/.test(url.pathname))return;if(url.protocol!=='https:'||url.hostname!==host||url.port||url.username||url.password||/^\/(?:szukaj|s|do-koszyka|do-schowka|koszyk|logowanie|info|tanie-ksiazki(?=\/?$))(?:\/|$)/i.test(url.pathname)||!title||!book.accept(title)||currency!=='PLN')return;const amount=Number(String(price).replace(/\s/g,'').replace(',','.'));if(!Number.isFinite(amount)||amount<=0||amount>100000)return;url.search='';url.hash='';if(seen.has(url.href))return;seen.add(url.href);rows.push({title,url:url.href,price:amount,available:true});};
  // Tezeusz cards contain variant counts and old prices; read only the
  // current-price element within the same product anchor.
  if(source==='Tezeusz.pl'&&/tezeusz-product-card/.test(html)){
@@ -84,7 +84,26 @@ function parseBookstore(html,book,source){
   visit(JSON.parse(json));
  }catch{}
  for(const p of products){const offer=Array.isArray(p.offers)?p.offers[0]:p.offers;if(!offer||offer['@type']==='AggregateOffer')continue;const price=offer.price??offer.lowPrice,currency=offer.priceCurrency||'PLN';if(offer.lowPrice!=null&&offer.price==null)continue;add(p.name||p.title,offer.url||p.url||p['@id'],price,currency);}
- if(['Allegro','Empik'].includes(source)){if(!rows.length)throw Error('UNRECOGNIZED_MARKETPLACE_DATA');return rows;}
+ // A marketplace may return a valid listing with zero matching books. A parsed
+ // product list is recognizable even if filters exclude every result.
+ if(['Allegro','Empik'].includes(source)){
+  if(rows.length)return rows;
+  if(source==='Empik'){
+   // Search cards can contain prices without JSON-LD. Require price metadata
+   // attached to the product anchor itself, never a price elsewhere on the page.
+   for(const m of html.matchAll(/<a\b([^>]*\bhref=["']([^"']+)["'][^>]*)>([\s\S]*?)<\/a>/gi)){
+    const attrs=m[1],inside=m[3];
+    const title=attrs.match(/\btitle=["']([^"']+)["']/i)?.[1]||
+      inside.match(/<img\b[^>]*\balt=["']([^"']+)["']/i)?.[1]||
+      attrs.match(/\baria-label=["']([^"']+)["']/i)?.[1];
+    const price=inside.match(/<meta\b[^>]*\bitemprop=["']price["'][^>]*\bcontent=["']([^"']+)/i)?.[1]||
+      inside.match(/<meta\b[^>]*\bcontent=["']([^"']+)["'][^>]*\bitemprop=["']price["']/i)?.[1];
+    if(title&&price)add(textOnly(title),decodeHtml(m[2]),price);
+   }
+  }
+  if(rows.length||products.length||/<(?:div|section|ul)\b[^>]*(?:data-testid=["'][^"']*(?:search-results|product-list)|class=["'][^"']*(?:search-results|product-list))/.test(html))return rows;
+  throw Error('UNRECOGNIZED_MARKETPLACE_DATA');
+ }
  if(rows.length||products.length)return rows;
  const anchors=[...html.matchAll(/<a\b([^>]*\bhref=["']([^"']+)["'][^>]*)>([\s\S]*?)<\/a>/gi)].filter(m=>{try{const u=new URL(decodeHtml(m[2]),'https://'+host);return u.hostname===host&&/^https?:$/.test(u.protocol)&&!/^\/(?:szukaj|s|do-koszyka|do-schowka|koszyk|logowanie|info|tanie-ksiazki(?=\/?$))(?:\/|$)/i.test(u.pathname);}catch{return false;}});
  if(!anchors.length)throw Error('UNRECOGNIZED_MARKETPLACE_DATA');
