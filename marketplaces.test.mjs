@@ -39,3 +39,22 @@ test('zmiana kolejności tych samych ofert zmienia fingerprint strony',()=>{
  const one={title:'Warhammer książka',url:'/items/12345',price:{amount:'20',currencyCode:'PLN'}},two={...one,url:'/items/12346'};
  assert.notEqual(vintedPageInfo(rsc([one,two]),{...task('Vinted'),paginationVersion:1,page:1}).digest,vintedPageInfo(rsc([two,one]),{...task('Vinted'),paginationVersion:1,page:1}).digest);
 });
+
+
+test('Empik accepts listing prices only when metadata belongs to the product anchor',()=>{
+ const html='<a href="/warcraft-opowiesci,p12345678"><img alt="Warcraft książka"/><meta itemprop="price" content="29.99"></a>'+
+  '<a href="/warcraft-inna,p12345679"><img alt="Warcraft książka bez ceny"/></a>'+
+  '<p>5.00 zł</p>';
+ const rows=parseMarketplace(html,{...task('Vinted','watchlist','Warcraft'),source:'Empik',host:'www.empik.com'});
+ assert.equal(rows.length,1);
+ assert.equal(rows[0].price,2999);
+ assert.equal(rows[0].url,'https://www.empik.com/warcraft-opowiesci,p12345678');
+});
+test('Empik recognizes valid zero-match product pages without a parser error',()=>{
+ const html=ld({'@type':'Product',name:'Niepowiązana książka',offers:{'@type':'Offer',price:'25',priceCurrency:'PLN',url:'https://www.empik.com/inne-ksiazki,p12345,ksiazka-p'}});
+ const rows=parseMarketplace(html,{...task('Vinted','watchlist','Warcraft'),source:'Empik',host:'www.empik.com'});
+ assert.deepEqual(rows,[]);
+});
+test('Empik does not treat an unrelated page as a valid empty product list',()=>{
+ assert.throws(()=>parseMarketplace('<html><title>News</title></html>',{...task('Vinted'),source:'Empik',host:'www.empik.com'}),/UNRECOGNIZED/);
+});
